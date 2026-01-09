@@ -113,7 +113,7 @@ The scripts support flags to alter the deployment type.
 | Flag | Applicable Lab | Description |
 | :--- | :--- | :--- |
 | `[NAME]` | All | The launchers accept an optional positional argument to set the VM name (e.g., `./launch.sh my-build`). |
-| `--snap` | MAAS-based | Installs the software (e.g., MAAS) using **Snap** packages instead of the default Deb/Apt packages. |
+| `--snap` | MAAS & Juju | Installs MAAS using *Snap* package instead of the default *Deb/Apt* package. |
 | `--nn` | MAAS *(Planned for others)* | No-Nest: Switches to a specialized Cloud-Init config for improved topology without nested virtualization. It flattens the topology so no VMs are spawned inside the main VM. |
 | `--dev` | OpenStack | Deploys DevStack (Medium load) instead of Charmed OpenStack (Heavy load). |
 | `--ha` | Landscape | Deploys a production-grade **High Availability** Charmed Landscape cluster using Juju (Heavy load). |
