@@ -1,0 +1,107 @@
+config:
+  core.https_address: 192.168.1.68:8443
+  core.trust_password: thinkpadp16-lxd
+networks:
+- config:
+    ipv4.address: 10.10.10.1/24
+    ipv4.nat: "true"
+    ipv6.address: none
+  description: ""
+  name: lxdbr0
+  type: bridge
+  project: default
+- config:
+    ipv4.address: 10.0.0.1/22
+    ipv4.dhcp: "false"
+    ipv4.nat: "true"
+    ipv6.address: none
+  description: ""
+  name: mbr0
+  type: bridge
+  project: default
+storage_pools:
+- config:
+    size: 500GiB
+  description: ""
+  name: default
+  driver: zfs
+storage_volumes: []
+profiles:
+- config: 
+    cloud-init.user-data: |+
+      #cloud-config
+      ssh_import_id: ['lp:pgdg99']
+      ssh_genkeytypes: [ed25519]
+
+      write_files:
+      - path: /etc/profile.d/default-editor.sh
+        permissions: '0644'
+        content: |
+          export EDITOR=nvim
+
+      - path: /etc/sudoers.d/keep-editor
+        permissions: '0440'
+        content: |
+          Defaults env_keep += "EDITOR"
+
+      package_update: true
+      package_upgrade: true
+      package_reboot_if_required: true
+
+      packages:
+        - git
+        - neovim
+        - pollinate
+
+      timezone: America/Bogota
+
+      random_seed:
+        command: [pollinate]
+        command_required: true
+        file: /dev/urandom
+
+    limits.cpu: "2"
+    limits.memory: 4GiB
+  description: Default LXD profile
+  devices:
+    eth0:
+      name: eth0
+      network: lxdbr0
+      type: nic
+    root:
+      path: /
+      pool: default
+      type: disk
+  name: default
+- config: 
+    cloud-init.network-config: |+
+      network:
+        version: 2
+        ethernets:
+          enp5s0:
+            dhcp4: false
+            addresses:
+              - 10.0.0.2/22
+            routes:
+              - to: default
+                via: 10.0.0.1
+            nameservers:
+              addresses:
+                - 8.8.8.8
+                - 1.1.1.1
+    limits.cpu: "3"
+    limits.memory: 8GiB
+  description: MAAS Profile - Uses mbr0 as the network device
+  devices:
+    eth0:
+      name: eth0
+      network: mbr0
+      type: nic
+    root:
+      path: /
+      pool: default
+      size: 30GiB
+      type: disk
+  name: maas
+projects: []
+cluster: null

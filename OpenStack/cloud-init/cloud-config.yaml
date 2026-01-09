@@ -1,0 +1,976 @@
+#cloud-config
+ssh_import_id: ['lp:pgdg99']
+ssh_genkeytypes: [ed25519]
+
+write_files:
+- path: /etc/netplan/60-lxdbr0.yaml
+  permissions: '0600'
+  content: |
+    network:
+      version: 2
+      bridges:
+        lxdbr0:
+          addresses: [10.10.20.1/24]
+          parameters:
+            stp: false
+            forward-delay: 0
+
+- path: /etc/sysctl.d/99-maas-nat.conf
+  content: |
+    net.ipv4.ip_forward=1
+
+- path: /etc/profile.d/default-editor.sh
+  permissions: '0644'
+  content: |
+    export EDITOR=nvim
+
+- path: /etc/sudoers.d/keep-editor
+  permissions: '0440'
+  content: |
+    Defaults env_keep += "EDITOR"
+
+lxd:
+  preseed: |
+    config:
+      core.https_address: '[::]:8444'
+      core.trust_password: password
+    storage_pools:
+    - config:
+        size: 240GB
+      description: ""
+      name: default
+      driver: zfs 
+    profiles:
+    - config: {}
+      description: ""
+      devices:
+        root:
+          path: /
+          pool: default
+          type: disk
+      name: default
+    projects: []
+    cluster: null
+
+apt:
+  sources:
+    source1:
+      source: ppa:maas/3.6
+      
+snap:
+  commands:
+  - snap install juju
+  - snap install vault
+  - snap install openstackclients
+
+packages:
+  - git
+  - neovim
+  - pollinate
+  - jq
+  - iptables-persistent
+#  - nginx
+
+package_update: true
+package_upgrade: true
+package_reboot_if_required: true
+
+timezone: America/Bogota
+
+random_seed:
+  command: [pollinate]
+  command_required: true
+  file: /dev/urandom
+
+runcmd:
+
+# Export variables
+- echo -e "\n-------- Exporting variables... --------\n"
+
+- export SSH_KEY=lp:pgdg99
+
+- export ADMIN_USER=admin
+- export ADMIN_PASS=admin
+- export ADMIN_EMAIL=admin@mail.com
+
+- export GATEWAY=10.10.20.1
+- export SUBNET=10.10.20.0/24
+
+- export MAAS_DNS=8.8.8.8
+- export MAAS_RESERVED_IP_START=10.10.20.200
+- export MAAS_RESERVED_IP_END=10.10.20.254
+
+- export OS_RESERVED_IP_START=10.10.20.100
+- export OS_RESERVED_IP_END=10.10.20.199
+
+- export JUJU_CONTROLLER_CPU=3
+- export JUJU_CONTROLLER_RAM=8192
+- export JUJU_CONTROLLER_DISK=20
+
+- export NODE_CPU=3
+- export NODE_RAM=8192
+- export NODE_MAIN_DISK=30
+- export NODE_OSD_DISK=20
+
+- export FLAVOR_RAM=2048
+- export FLAVOR_DISK=10
+- export FLAVOR_E_DISK=10
+
+- export OS_VERSION=2023.2/stable
+
+- export NOVA_COMPUTE_VERSION=$OS_VERSION
+- export NOVA_CLOUD_CONTROLLER_VERSION=$OS_VERSION
+- export NEUTRON_API_VERSION=$OS_VERSION
+- export NEUTRON_API_PLUGIN_OVN_VERSION=$OS_VERSION
+- export KEYSTONE_VERSION=$OS_VERSION
+- export PLACEMENT_VERSION=$OS_VERSION
+- export GLANCE_VERSION=$OS_VERSION
+- export CINDER_VERSION=$OS_VERSION
+- export CINDER_CEPH_VERSION=$OS_VERSION
+- export OPENSTACK_DASHBOARD_VERSION=$OS_VERSION
+
+- export MYSQL_INNODB_VERSION=8.0/stable
+
+- export VAULT_VERSION=1.8/stable
+
+- export RABBITMQ_VERSION=3.9/stable
+
+- export OVN_CENTRAL_VERSION=23.09/stable
+- export OVN_CHASSIS_VERSION=23.09/stable
+
+- export CEPH_VERSION=reef/stable
+
+- export CEPH_OSD_VERSION=$CEPH_VERSION
+- export CEPH_MON_VERSION=$CEPH_VERSION
+- export CEPH_RADOSGW_VERSION=$CEPH_VERSION
+
+- export IP_ADDRESS=$(ip -j route show default | jq -r '.[].prefsrc')
+- export INTERFACE=$(ip -j route show default | jq -r '.[].dev')
+
+# Make the bridge active on the first boot
+- echo -e "\n-------- Applying and attaching network bridge... --------\n"
+
+- netplan apply
+
+# Attach lxdbr0 bridge to LXD default profile
+- lxc network attach-profile lxdbr0 default
+
+# Fetch IPv4 address from the device, setup forwarding and NAT
+- echo -e "\n-------- Configuring Port Forwarding and NAT... --------\n"
+
+- sysctl -p /etc/sysctl.d/99-maas-nat.conf
+- iptables -t nat -A POSTROUTING -o $INTERFACE -j SNAT --to $IP_ADDRESS
+
+# Persist NAT configuration
+- netfilter-persistent save
+
+# Install MAAS now that LXD and networking are configured
+- echo -e "\n-------- Installing MAAS... --------\n"
+
+- apt-get update
+- apt-get remove -y systemd-timesyncd
+- apt-get install -y maas
+
+# Initialise MAAS
+- echo -e "\n-------- Initializing MAAS... --------\n"
+
+- maas init --admin-username $ADMIN_USER --admin-password $ADMIN_PASS --admin-email $ADMIN_EMAIL --admin-ssh-import $SSH_KEY --rbac-url "" --candid-agent-file ""
+
+# Wait for MAAS services to be ready
+- |
+  echo -e "\n-------- Waiting for MAAS API to be ready... --------\n"
+  
+  until maas login $ADMIN_USER 'http://localhost:5240/MAAS/' $(maas apikey --username $ADMIN_USER) > /dev/null 2>&1; do
+    echo "MAAS is not ready yet (502). Retrying in 30 seconds..."
+    sleep 30
+  done
+
+# Grab API key and login as admin
+- echo -e "\n-------- Logging in as admin user... --------\n"
+
+- export APIKEY=$(maas apikey --username $ADMIN_USER)
+- maas login $ADMIN_USER 'http://localhost:5240/MAAS/' $APIKEY
+
+- maas $ADMIN_USER maas set-config name=maas_name value=maas name=completed_intro value=true
+
+# Automatically create and add ssh keys to MAAS
+- echo -e "\n-------- Generating SSH keys and adding them to MAAS... --------\n"
+
+- ssh-keygen -q -t rsa -N "" -f "/home/ubuntu/.ssh/id_rsa"
+- chown ubuntu:ubuntu /home/ubuntu/.ssh/id_rsa /home/ubuntu/.ssh/id_rsa.pub
+- chmod 600 /home/ubuntu/.ssh/id_rsa
+- chmod 644 /home/ubuntu/.ssh/id_rsa.pub
+- maas $ADMIN_USER sshkeys create key="$(cat /home/ubuntu/.ssh/id_rsa.pub)"
+
+# Configure MAAS networking (set gateways, vlans, DHCP on etc)
+- echo -e "\n-------- Configuring MAAS networking... --------\n"
+
+- export FABRIC_ID=$(maas $ADMIN_USER subnet read "$SUBNET" | jq -r ".vlan.fabric_id")
+- export VLAN_TAG=$(maas $ADMIN_USER subnet read "$SUBNET" | jq -r ".vlan.vid")
+- export PRIMARY_RACK=$(maas $ADMIN_USER rack-controllers read | jq -r ".[] | .system_id")
+
+- maas $ADMIN_USER subnet update $SUBNET gateway_ip=$GATEWAY
+- maas $ADMIN_USER ipranges create type=dynamic start_ip=$MAAS_RESERVED_IP_START end_ip=$MAAS_RESERVED_IP_END
+- maas $ADMIN_USER ipranges create type=reserved start_ip=$OS_RESERVED_IP_START end_ip=$OS_RESERVED_IP_END
+- maas $ADMIN_USER vlan update $FABRIC_ID $VLAN_TAG dhcp_on=true primary_rack=$PRIMARY_RACK
+- maas $ADMIN_USER maas set-config name=upstream_dns value=$MAAS_DNS
+
+# Configure boot images
+- echo -e "\n-------- Configuring MAAS boot images... --------\n"
+
+#- maas $ADMIN_USER boot-sources create url=$URL keyring_filename=$KEYRING_FILE
+- export BOOT_SOURCE_ID=$(maas $ADMIN_USER boot-sources read | jq -r '.[0].id')
+
+- maas $ADMIN_USER boot-source-selections create $BOOT_SOURCE_ID os="ubuntu" release="noble" arches="amd64" labels='*' subarches='*'
+- maas $ADMIN_USER boot-source-selections create $BOOT_SOURCE_ID os="ubuntu" release="jammy" arches="amd64" labels='*' subarches='*'
+
+- maas $ADMIN_USER boot-resources import
+
+# Wait for MAAS boot images to be ready
+- sleep 90
+
+# Add LXD as a VM host for MAAS
+- echo -e "\n-------- Adding LXD as VM host in MAAS... --------\n"
+
+- maas $ADMIN_USER vm-hosts create type=lxd power_address=https://${IP_ADDRESS}:8444 password=password name=LXD project=maas
+- export VM_HOST_ID=$(maas $ADMIN_USER vm-hosts read | jq -r '.[0].id')
+
+# Compose VMs using VM host (-c limits.cpu=15 -c limits.memory=40GiB --device root,size=220GiB)
+- echo -e "\n-------- Composing VM(s) using LXD... --------\n"
+
+- export SYSTEM_ID_1=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$JUJU_CONTROLLER_CPU memory=$JUJU_CONTROLLER_RAM storage=$JUJU_CONTROLLER_DISK hostname=controller | jq -r '.system_id')
+
+- export SYSTEM_ID_2=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage="root:$NODE_MAIN_DISK,disk1:$NODE_OSD_DISK" hostname=node1 | jq -r '.system_id')
+
+- export SYSTEM_ID_3=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage="root:$NODE_MAIN_DISK,disk1:$NODE_OSD_DISK" hostname=node2 | jq -r '.system_id')
+
+- export SYSTEM_ID_4=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage="root:$NODE_MAIN_DISK,disk1:$NODE_OSD_DISK" hostname=node3 | jq -r '.system_id')
+
+- export SYSTEM_ID_5=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage="root:$NODE_MAIN_DISK,disk1:$NODE_OSD_DISK" hostname=node4 | jq -r '.system_id')
+
+# Wait for VMs to be ready
+- |
+  echo "Waiting for VMs to enter 'Ready' state..."
+  
+  # Aggregate the IDs from your previous exports
+  IDS="$SYSTEM_ID_1 $SYSTEM_ID_2 $SYSTEM_ID_3 $SYSTEM_ID_4 $SYSTEM_ID_5"
+  
+  # Safety check: Ensure we actually have IDs to check
+  if [ -z "$(echo "$IDS" | tr -d ' ')" ]; then
+    echo "Error: No System IDs found. Exports may not have persisted."
+    exit 1
+  fi
+
+  # Start the loop
+  while true; do
+    all_ready=true
+    
+    for id in $IDS; do
+      # Query MAAS for the status name (requires jq)
+      status=$(maas $ADMIN_USER machine read "$id" | jq -r '.status_name')
+      echo "  Machine $id is currently '$status'..."
+      # If any machine is NOT ready, we mark the flag as false
+      if [ "$status" != "Ready" ]; then
+         all_ready=false
+      fi
+    done
+
+    # If the flag is still true, everyone is ready -> break the loop
+    if [ "$all_ready" = true ]; then
+      echo "All VMs are Ready!"
+      break
+    fi
+
+    # Wait 30 seconds before checking again
+    echo "Waiting 60s before checking again..."
+    sleep 60
+  done
+
+# Add OVS Bridges to each machine
+- echo -e "\n-------- Creating OVS Bridges... --------\n"
+
+- export INTERFACE_ID_2=$(maas $ADMIN_USER machine read $SYSTEM_ID_2 | jq -r '.interface_set[] | .id')
+- export INTERFACE_ID_3=$(maas $ADMIN_USER machine read $SYSTEM_ID_3 | jq -r '.interface_set[] | .id')
+- export INTERFACE_ID_4=$(maas $ADMIN_USER machine read $SYSTEM_ID_4 | jq -r '.interface_set[] | .id')
+- export INTERFACE_ID_5=$(maas $ADMIN_USER machine read $SYSTEM_ID_5 | jq -r '.interface_set[] | .id')
+
+- export MAC_2=$(maas $ADMIN_USER machine read $SYSTEM_ID_2 | jq -r '.interface_set[] | .mac_address')
+- export MAC_3=$(maas $ADMIN_USER machine read $SYSTEM_ID_3 | jq -r '.interface_set[] | .mac_address')
+- export MAC_4=$(maas $ADMIN_USER machine read $SYSTEM_ID_4 | jq -r '.interface_set[] | .mac_address')
+- export MAC_5=$(maas $ADMIN_USER machine read $SYSTEM_ID_5 | jq -r '.interface_set[] | .mac_address')
+
+- export BRIDGE_ID_2=$(maas $ADMIN_USER interfaces create-bridge $SYSTEM_ID_2 name=br-ex bridge_type=ovs parent=$INTERFACE_ID_2 | jq -r '.id')
+- export BRIDGE_ID_3=$(maas $ADMIN_USER interfaces create-bridge $SYSTEM_ID_3 name=br-ex bridge_type=ovs parent=$INTERFACE_ID_3 | jq -r '.id')
+- export BRIDGE_ID_4=$(maas $ADMIN_USER interfaces create-bridge $SYSTEM_ID_4 name=br-ex bridge_type=ovs parent=$INTERFACE_ID_4 | jq -r '.id')
+- export BRIDGE_ID_5=$(maas $ADMIN_USER interfaces create-bridge $SYSTEM_ID_5 name=br-ex bridge_type=ovs parent=$INTERFACE_ID_5 | jq -r '.id')
+
+- maas $ADMIN_USER interface link-subnet $SYSTEM_ID_2 $BRIDGE_ID_2 subnet=$SUBNET mode=auto
+- maas $ADMIN_USER interface link-subnet $SYSTEM_ID_3 $BRIDGE_ID_3 subnet=$SUBNET mode=auto
+- maas $ADMIN_USER interface link-subnet $SYSTEM_ID_4 $BRIDGE_ID_4 subnet=$SUBNET mode=auto
+- maas $ADMIN_USER interface link-subnet $SYSTEM_ID_5 $BRIDGE_ID_5 subnet=$SUBNET mode=auto
+
+# Create tags and add them to commissioned machines
+- echo -e "\n-------- Creating and adding Tags... --------\n"
+
+- maas $ADMIN_USER tags create name=juju
+- maas $ADMIN_USER tag update-nodes juju add=$SYSTEM_ID_1
+
+- maas $ADMIN_USER tags create name=compute
+- maas $ADMIN_USER tag update-nodes compute add=$SYSTEM_ID_2
+- maas $ADMIN_USER tag update-nodes compute add=$SYSTEM_ID_3
+- maas $ADMIN_USER tag update-nodes compute add=$SYSTEM_ID_4
+- maas $ADMIN_USER tag update-nodes compute add=$SYSTEM_ID_5
+
+# Create MAAS Juju Cloud configuration files
+- echo -e "\n-------- Creating MAAS Juju Cloud Configs... --------\n"
+
+- |
+  cat <<EOF > /home/ubuntu/maas-cloud.yaml
+  clouds:
+    maas:
+      type: maas
+      auth-types: [oauth1]
+      endpoint: http://${IP_ADDRESS}:5240/MAAS
+  EOF
+
+- |
+  cat <<EOF > /home/ubuntu/maas-creds.yaml
+  credentials:
+    maas:
+      anyuser:
+        auth-type: oauth1
+        maas-oauth: $APIKEY
+  EOF
+
+- chown ubuntu:ubuntu /home/ubuntu/maas-*.yaml
+
+# Add MAAS as a Juju Cloud
+- echo -e "\n-------- Adding MAAS as a Juju Cloud... --------\n"
+
+- su ubuntu -c 'juju add-cloud --client -f ~/maas-cloud.yaml maas'
+
+# Add MAAS as a Juju Cloud
+- echo -e "\n-------- Adding MAAS Credentials to Juju... --------\n"
+
+- su ubuntu -c 'juju add-credential --client -f ~/maas-creds.yaml maas'
+
+# Remove config files
+- rm /home/ubuntu/maas-*.yaml
+
+# Bootstrap Juju controller
+- echo -e "\n-------- Bootstrapping Juju Controller... --------\n"
+
+- su ubuntu -c 'juju bootstrap --constraints tags=juju maas juju-controller'
+
+
+# ---------------------------------------------- DEPLOY CHARMED OPENSTACK ----------------------------------------------
+
+
+# Create Juju Model
+- echo -e "\n-------- Creating Juju Openstack Model... --------\n"
+
+- su ubuntu -c 'juju add-model --config default-series=jammy openstack'
+
+# ------------------------------------------------- Deploy Ceph OSD -------------------------------------------------
+- echo -e "\n-------- Deploying Ceph OSD... --------\n"
+
+- |
+  cat <<EOF > /home/ubuntu/ceph-osd.yaml
+  ceph-osd:
+    osd-devices: /dev/sdb
+  EOF
+  
+- chown ubuntu:ubuntu /home/ubuntu/ceph-osd.yaml
+
+- su ubuntu -c 'juju deploy -n 4 --channel $CEPH_OSD_VERSION --config ~/ceph-osd.yaml --constraints tags=compute ceph-osd'
+
+- rm /home/ubuntu/ceph-osd.yaml
+
+# Wait for Ceph OSD to be deployed
+- echo -e "\n-------- Waiting for Ceph OSD to be deployed... --------\n"
+
+- su ubuntu -c "juju wait-for application ceph-osd --timeout=20m --query='life==\"alive\" && status==\"blocked\" && len(units) == 4'"
+
+# ----------------------------------------------- Deploy Nova Compute -----------------------------------------------
+- echo -e "\n-------- Deploying Nova Compute... --------\n"
+
+- |
+  cat <<EOF > /home/ubuntu/nova-compute.yaml
+  nova-compute:
+    config-flags: default_ephemeral_format=ext4
+    enable-live-migration: true
+    enable-resize: true
+    migration-auth-type: ssh
+    virt-type: qemu
+  EOF
+  
+- chown ubuntu:ubuntu /home/ubuntu/nova-compute.yaml
+
+- su ubuntu -c 'juju deploy -n 3 --to 1,2,3 --channel $NOVA_COMPUTE_VERSION --config ~/nova-compute.yaml nova-compute'
+
+- rm /home/ubuntu/nova-compute.yaml
+
+# Wait for Nova Compute to be deployed
+- echo -e "\n-------- Waiting for Nova Compute to be deployed... --------\n"
+
+- su ubuntu -c "juju wait-for application nova-compute --query='life==\"alive\" && status==\"blocked\" && len(units) == 3'"
+
+# ------------------------------------------- Deploy MySQL InnoDB Cluster -------------------------------------------
+- echo -e "\n-------- Deploying MySQL InnoDB Cluster... --------\n"
+
+- su ubuntu -c 'juju deploy -n 3 --to lxd:0,lxd:1,lxd:2 --channel $MYSQL_INNODB_VERSION mysql-innodb-cluster'
+
+# Wait for MySQL InnoDB Cluster to be ready
+- echo -e "\n-------- Waiting for MySQL InnoDB Cluster to be ready... --------\n"
+
+- su ubuntu -c "juju wait-for application mysql-innodb-cluster --query='life==\"alive\" && status==\"active\" && len(units) == 3'"
+
+# -------------------------------------------------- Deploy Vault --------------------------------------------------
+- echo -e "\n-------- Deploying Vault... --------\n"
+
+- su ubuntu -c 'juju deploy --to lxd:3 --channel $VAULT_VERSION vault'
+
+# Join Vault to the cloud database
+- echo -e "\n-------- Joining Vault to the Cloud Database... --------\n"
+
+- su ubuntu -c 'juju deploy --channel $MYSQL_INNODB_VERSION mysql-router vault-mysql-router'
+- su ubuntu -c 'juju integrate vault-mysql-router:db-router mysql-innodb-cluster:db-router'
+- su ubuntu -c 'juju integrate vault-mysql-router:shared-db vault:shared-db'
+
+# Wait for Vault to be deployed
+- echo -e "\n-------- Waiting for Vault to be deployed... --------\n"
+
+- su ubuntu -c "juju wait-for application vault --query='life==\"alive\" && status==\"blocked\"'"
+- su ubuntu -c "juju wait-for application vault-mysql-router --query='life==\"alive\" && status==\"blocked\"'"
+
+# ------------------------------------------- Perform Vault initialization -------------------------------------------
+- echo -e "\n-------- Initializing Vault... --------\n"
+
+- export VAULT_ADDR="http://$(su ubuntu -c 'juju status --format=json' | jq -r '.applications.vault.units[] | select(.leader == true) | ."public-address"'):8200"
+
+- export INIT_OUTPUT=$(vault operator init -key-shares=3 -key-threshold=2)
+
+- export UNSEAL_KEY_1=$(echo "$INIT_OUTPUT" | grep "Unseal Key 1:" | awk '{print $4}')
+- export UNSEAL_KEY_2=$(echo "$INIT_OUTPUT" | grep "Unseal Key 2:" | awk '{print $4}')
+- export UNSEAL_KEY_3=$(echo "$INIT_OUTPUT" | grep "Unseal Key 3:" | awk '{print $4}')
+
+- export VAULT_TOKEN=$(echo "$INIT_OUTPUT" | grep "Initial Root Token:" | awk '{print $4}')
+
+- echo -e "\n Unseal Key 1 - $UNSEAL_KEY_1 \n"
+- echo -e "\n Unseal Key 2 - $UNSEAL_KEY_2 \n"
+- echo -e "\n Unseal Key 3 - $UNSEAL_KEY_3 \n"
+
+# Unsealing Vault
+- echo -e "\n-------- Unsealing Vault... --------\n"
+
+- su ubuntu -c 'vault operator unseal $UNSEAL_KEY_1'
+- su ubuntu -c 'vault operator unseal $UNSEAL_KEY_2'
+
+# Authorize Vault
+- echo -e "\n-------- Authorizing Vault... --------\n"
+
+- su ubuntu -c 'vault token create -ttl=10m'
+- su ubuntu -c 'juju run vault/leader authorize-charm token=$VAULT_TOKEN'
+
+# Have Vault generate a self-signed root CA certificate
+- echo -e "\n-------- Generating Self-signed root CA certificate... --------\n"
+
+- su ubuntu -c 'juju run vault/leader generate-root-ca'
+- su ubuntu -c 'juju integrate mysql-innodb-cluster:certificates vault:certificates'
+
+# Wait for Vault to be ready
+- echo -e "\n-------- Waiting for Vault to be ready... --------\n"
+
+- su ubuntu -c "juju wait-for application vault --query='life==\"alive\" && status==\"active\"'"
+- su ubuntu -c "juju wait-for application vault-mysql-router --query='life==\"alive\" && status==\"active\"'"
+
+# -------------------------------------------- Deploy Neutron networking --------------------------------------------
+- echo -e "\n-------- Deploying Neutron... --------\n"
+
+- |
+  cat <<EOF > /home/ubuntu/neutron.yaml
+  ovn-chassis:
+    bridge-interface-mappings: br-ex:enp5s0
+    ovn-bridge-mappings: physnet1:br-ex
+  neutron-api:
+    neutron-security-groups: true
+    flat-network-providers: physnet1
+  EOF
+  
+- chown ubuntu:ubuntu /home/ubuntu/neutron.yaml
+
+- su ubuntu -c 'juju deploy -n 3 --to lxd:0,lxd:1,lxd:2 --channel $OVN_CENTRAL_VERSION ovn-central'
+- su ubuntu -c 'juju deploy --to lxd:1 --channel $NEUTRON_API_VERSION --config ~/neutron.yaml neutron-api'
+
+# Deploy the subordinate charm applications
+- su ubuntu -c 'juju deploy --channel $NEUTRON_API_PLUGIN_OVN_VERSION neutron-api-plugin-ovn'
+- su ubuntu -c 'juju deploy --channel $OVN_CHASSIS_VERSION --config ~/neutron.yaml ovn-chassis'
+
+- rm /home/ubuntu/neutron.yaml
+
+# Wait for OVN Central to be deployed
+- echo -e "\n-------- Waiting for OVN Central to be deployed... --------\n"
+
+- su ubuntu -c "juju wait-for application ovn-central --query='life==\"alive\" && status==\"blocked\" && len(units) == 3'"
+
+# Integrate Neutron API with OVN
+- echo -e "\n-------- Integrate Neutron API with OVN... --------\n"
+
+- su ubuntu -c 'juju integrate neutron-api-plugin-ovn:neutron-plugin neutron-api:neutron-plugin-api-subordinate'
+- su ubuntu -c 'juju integrate neutron-api-plugin-ovn:ovsdb-cms ovn-central:ovsdb-cms'
+- su ubuntu -c 'juju integrate ovn-chassis:ovsdb ovn-central:ovsdb'
+
+# Integrate OVN with Nova Compute
+- echo -e "\n-------- Integrate OVN with Nova Compute... --------\n"
+
+- su ubuntu -c 'juju integrate ovn-chassis:nova-compute nova-compute:neutron-plugin'
+
+# Integrate Certificates
+- echo -e "\n-------- Integrate Certificates... --------\n"
+
+- su ubuntu -c 'juju integrate neutron-api:certificates vault:certificates'
+- su ubuntu -c 'juju integrate neutron-api-plugin-ovn:certificates vault:certificates'
+- su ubuntu -c 'juju integrate ovn-central:certificates vault:certificates'
+- su ubuntu -c 'juju integrate ovn-chassis:certificates vault:certificates'
+
+# Join Neutron API to the cloud database
+- echo -e "\n-------- Joining Neutron API to the Cloud Database... --------\n"
+
+- su ubuntu -c 'juju deploy --channel $MYSQL_INNODB_VERSION mysql-router neutron-api-mysql-router'
+- su ubuntu -c 'juju integrate neutron-api-mysql-router:db-router mysql-innodb-cluster:db-router'
+- su ubuntu -c 'juju integrate neutron-api-mysql-router:shared-db neutron-api:shared-db'
+
+# Wait for OVN Central to be ready
+- echo -e "\n-------- Waiting for OVN Central & Chassis to be ready... --------\n"
+
+- su ubuntu -c "juju wait-for application ovn-central --query='life==\"alive\" && status==\"active\" && len(units) == 3'"
+- su ubuntu -c "juju wait-for application ovn-chassis --query='life==\"alive\" && status==\"active\" && len(units) == 3'"
+- su ubuntu -c "juju wait-for application neutron-api-mysql-router --query='life==\"alive\" && status==\"active\"'"
+
+# ---------------------------------------------- Deploy Keystone ----------------------------------------------
+- echo -e "\n-------- Deploying Keystone... --------\n"
+
+- su ubuntu -c 'juju deploy --to lxd:0 --channel $KEYSTONE_VERSION keystone'
+
+# Join Keystone to the cloud database
+- echo -e "\n-------- Joining Keystone to the Cloud Database... --------\n"
+
+- su ubuntu -c 'juju deploy --channel $MYSQL_INNODB_VERSION mysql-router keystone-mysql-router'
+- su ubuntu -c 'juju integrate keystone-mysql-router:db-router mysql-innodb-cluster:db-router'
+- su ubuntu -c 'juju integrate keystone-mysql-router:shared-db keystone:shared-db'
+
+# Integrate Keystone with Vault and Neutron API
+- echo -e "\n-------- Integrate Keystone with Vault and Neutron API... --------\n"
+
+- su ubuntu -c 'juju integrate keystone:identity-service neutron-api:identity-service'
+- su ubuntu -c 'juju integrate keystone:certificates vault:certificates'
+
+# Wait for Keystone to be ready
+- echo -e "\n-------- Waiting for Keystone to be ready... --------\n"
+
+- su ubuntu -c "juju wait-for application keystone --query='life==\"alive\" && status==\"blocked\"'"
+- su ubuntu -c "juju wait-for application keystone-mysql-router --query='life==\"alive\" && status==\"active\"'"
+
+# ------------------------------------------------ Deploy RabbitMQ ------------------------------------------------
+- echo -e "\n-------- Deploying RabbitMQ... --------\n"
+
+- su ubuntu -c 'juju deploy --to lxd:2 --channel $RABBITMQ_VERSION rabbitmq-server'
+
+# Integrate RabbitMQ with Nova Compute and Neutron API
+- echo -e "\n-------- Integrate RabbitMQ with Nova Compute and Neutron API... --------\n"
+
+- su ubuntu -c 'juju integrate rabbitmq-server:amqp neutron-api:amqp'
+- su ubuntu -c 'juju integrate rabbitmq-server:amqp nova-compute:amqp'
+
+# Wait for RabbitMQ to be ready
+- echo -e "\n-------- Waiting for RabbitMQ to be ready... --------\n"
+
+- su ubuntu -c "juju wait-for application rabbitmq-server --query='life==\"alive\" && status==\"active\"'"
+
+# ------------------------------------------- Deploy Nova Cloud Controller -------------------------------------------
+- echo -e "\n-------- Deploying Nova Cloud Controller... --------\n"
+
+- |
+  cat <<EOF > /home/ubuntu/ncc.yaml
+  nova-cloud-controller:
+    network-manager: Neutron
+  EOF
+
+- chown ubuntu:ubuntu /home/ubuntu/ncc.yaml
+
+- su ubuntu -c 'juju deploy --to lxd:3 --channel $NOVA_CLOUD_CONTROLLER_VERSION --config ~/ncc.yaml nova-cloud-controller'
+
+- rm /home/ubuntu/ncc.yaml
+
+# Join Nova Cloud Controller to the cloud database
+- echo -e "\n-------- Joining Nova Cloud Controller to the Cloud Database... --------\n"
+
+- su ubuntu -c 'juju deploy --channel $MYSQL_INNODB_VERSION mysql-router ncc-mysql-router'
+- su ubuntu -c 'juju integrate ncc-mysql-router:db-router mysql-innodb-cluster:db-router'
+- su ubuntu -c 'juju integrate ncc-mysql-router:shared-db nova-cloud-controller:shared-db'
+
+# Integrate Nova Cloud Controller
+- echo -e "\n-------- Integrate Nova Cloud Controller... --------\n"
+
+- su ubuntu -c 'juju integrate nova-cloud-controller:identity-service keystone:identity-service'
+- su ubuntu -c 'juju integrate nova-cloud-controller:amqp rabbitmq-server:amqp'
+- su ubuntu -c 'juju integrate nova-cloud-controller:neutron-api neutron-api:neutron-api'
+- su ubuntu -c 'juju integrate nova-cloud-controller:cloud-compute nova-compute:cloud-compute'
+- su ubuntu -c 'juju integrate nova-cloud-controller:certificates vault:certificates'
+
+# Wait for Nova Cloud Controller to be ready
+- echo -e "\n-------- Waiting for Nova Cloud Controller to be ready... --------\n"
+
+- su ubuntu -c "juju wait-for application nova-cloud-controller --query='life==\"alive\" && status==\"blocked\"'"
+- su ubuntu -c "juju wait-for application ncc-mysql-router --query='life==\"alive\" && status==\"active\"'"
+
+# ------------------------------------------------ Deploy Placement ------------------------------------------------
+- echo -e "\n-------- Deploying Placement... --------\n"
+
+- su ubuntu -c 'juju deploy --to lxd:3 --channel $PLACEMENT_VERSION placement'
+
+# Join placement to the cloud database
+- echo -e "\n-------- Joining Placement to the Cloud Database... --------\n"
+
+- su ubuntu -c 'juju deploy --channel $MYSQL_INNODB_VERSION mysql-router placement-mysql-router'
+- su ubuntu -c 'juju integrate placement-mysql-router:db-router mysql-innodb-cluster:db-router'
+- su ubuntu -c 'juju integrate placement-mysql-router:shared-db placement:shared-db'
+
+# Integrate Placement
+- echo -e "\n-------- Integrate Placement... --------\n"
+
+- su ubuntu -c 'juju integrate placement:identity-service keystone:identity-service'
+- su ubuntu -c 'juju integrate placement:placement nova-cloud-controller:placement'
+- su ubuntu -c 'juju integrate placement:certificates vault:certificates'
+
+# Wait for Placement to be ready
+- echo -e "\n-------- Waiting for Placement to be ready... --------\n"
+
+- su ubuntu -c "juju wait-for application placement --query='life==\"alive\" && status==\"blocked\"'"
+- su ubuntu -c "juju wait-for application placement-mysql-router --query='life==\"alive\" && status==\"active\"'"
+
+# -------------------------------------------- Deploy OpenStack Dashboard --------------------------------------------
+- echo -e "\n-------- Deploying OpenStack Dashboard... --------\n"
+
+- su ubuntu -c 'juju deploy --to lxd:2 --channel $OPENSTACK_DASHBOARD_VERSION openstack-dashboard'
+
+# Join OpenStack Dashboard to the cloud database
+- echo -e "\n-------- Joining OpenStack Dashboard to the Cloud Database... --------\n"
+
+- su ubuntu -c 'juju deploy --channel $MYSQL_INNODB_VERSION mysql-router dashboard-mysql-router'
+- su ubuntu -c 'juju integrate dashboard-mysql-router:db-router mysql-innodb-cluster:db-router'
+- su ubuntu -c 'juju integrate dashboard-mysql-router:shared-db openstack-dashboard:shared-db'
+
+# Integrate OpenStack Dashboard
+- echo -e "\n-------- Integrate OpenStack Dashboard... --------\n"
+
+- su ubuntu -c 'juju integrate openstack-dashboard:identity-service keystone:identity-service'
+- su ubuntu -c 'juju integrate openstack-dashboard:certificates vault:certificates'
+
+# Wait for OpenStack Dashboard to be ready
+- echo -e "\n-------- Waiting for OpenStack Dashboard to be ready... --------\n"
+
+- su ubuntu -c "juju wait-for application openstack-dashboard --query='life==\"alive\" && status==\"active\"'"
+- su ubuntu -c "juju wait-for application dashboard-mysql-router --query='life==\"alive\" && status==\"active\"'"
+
+# ------------------------------------------------ Deploy Glance ------------------------------------------------
+- echo -e "\n-------- Deploying Glance... --------\n"
+
+- su ubuntu -c 'juju deploy --to lxd:3 --channel $GLANCE_VERSION glance'
+
+# Join Glance to the cloud database
+- echo -e "\n-------- Joining Glance to the Cloud Database... --------\n"
+
+- su ubuntu -c 'juju deploy --channel $MYSQL_INNODB_VERSION mysql-router glance-mysql-router'
+- su ubuntu -c 'juju integrate glance-mysql-router:db-router mysql-innodb-cluster:db-router'
+- su ubuntu -c 'juju integrate glance-mysql-router:shared-db glance:shared-db'
+
+# Integrate Glance
+- echo -e "\n-------- Integrate Glance... --------\n"
+
+- su ubuntu -c 'juju integrate glance:image-service nova-cloud-controller:image-service'
+- su ubuntu -c 'juju integrate glance:image-service nova-compute:image-service'
+- su ubuntu -c 'juju integrate glance:identity-service keystone:identity-service'
+- su ubuntu -c 'juju integrate glance:certificates vault:certificates'
+
+# Wait for Glance to be ready
+- echo -e "\n-------- Waiting for Glance to be ready... --------\n"
+
+- su ubuntu -c "juju wait-for application glance --query='life==\"alive\" && status==\"waiting\"'"
+- su ubuntu -c "juju wait-for application glance-mysql-router --query='life==\"alive\" && status==\"active\"'"
+
+# ---------------------------------------------- Deploy Ceph Monitor ----------------------------------------------
+- echo -e "\n-------- Deploying Ceph Monitor... --------\n"
+
+- |
+  cat <<EOF > /home/ubuntu/ceph-mon.yaml
+  ceph-mon:
+    expected-osd-count: 4
+    monitor-count: 3
+  EOF
+
+- chown ubuntu:ubuntu /home/ubuntu/ceph-mon.yaml
+
+- su ubuntu -c 'juju deploy -n 3 --to lxd:0,lxd:1,lxd:2 --channel $CEPH_MON_VERSION --config ~/ceph-mon.yaml ceph-mon'
+
+- rm /home/ubuntu/ceph-mon.yaml
+
+# Integrate Ceph Monitor
+- echo -e "\n-------- Integrate Ceph Monitor... --------\n"
+
+- su ubuntu -c 'juju integrate ceph-mon:osd ceph-osd:mon'
+- su ubuntu -c 'juju integrate ceph-mon:client nova-compute:ceph'
+- su ubuntu -c 'juju integrate ceph-mon:client glance:ceph'
+
+# Set Ceph as the storage backend for Nova non-bootable disk images
+- su ubuntu -c 'juju config nova-compute libvirt-image-backend=rbd'
+
+# Wait for Ceph Monitor to be ready
+- echo -e "\n-------- Waiting for Ceph Monitor to be ready... --------\n"
+
+- su ubuntu -c "juju wait-for application ceph-mon --query='life==\"alive\" && status==\"blocked\" && len(units) == 3'"
+
+# ---------------------------------------------- Deploy Cinder ----------------------------------------------
+- echo -e "\n-------- Deploying Cinder... --------\n"
+
+- |
+  cat <<EOF > /home/ubuntu/cinder.yaml
+  cinder:
+    block-device: None
+    glance-api-version: 2
+  EOF
+
+- chown ubuntu:ubuntu /home/ubuntu/cinder.yaml
+
+- su ubuntu -c 'juju deploy --to lxd:1 --channel $CINDER_VERSION --config ~/cinder.yaml cinder'
+
+- rm /home/ubuntu/cinder.yaml
+
+# Join Cinder to the cloud database
+- echo -e "\n-------- Joining Cinder to the Cloud Database... --------\n"
+
+- su ubuntu -c 'juju deploy --channel $MYSQL_INNODB_VERSION mysql-router cinder-mysql-router'
+- su ubuntu -c 'juju integrate cinder-mysql-router:db-router mysql-innodb-cluster:db-router'
+- su ubuntu -c 'juju integrate cinder-mysql-router:shared-db cinder:shared-db'
+
+# Integrate Cinder
+- echo -e "\n-------- Integrate Cinder... --------\n"
+
+- su ubuntu -c 'juju integrate cinder:cinder-volume-service nova-cloud-controller:cinder-volume-service'
+- su ubuntu -c 'juju integrate cinder:identity-service keystone:identity-service'
+- su ubuntu -c 'juju integrate cinder:amqp rabbitmq-server:amqp'
+- su ubuntu -c 'juju integrate cinder:image-service glance:image-service'
+- su ubuntu -c 'juju integrate cinder:certificates vault:certificates'
+
+# Wait for Cinder to be ready
+- echo -e "\n-------- Waiting for Cinder to be ready... --------\n"
+
+- su ubuntu -c "juju wait-for application cinder --query='life==\"alive\" && status==\"blocked\"'"
+- su ubuntu -c "juju wait-for application cinder-mysql-router --query='life==\"alive\" && status==\"active\"'"
+
+# ---------------------------------------------- Deploy Cinder-Ceph ----------------------------------------------
+- echo -e "\n-------- Deploying Cinder-Ceph... --------\n"
+
+- su ubuntu -c 'juju deploy --channel $CINDER_CEPH_VERSION cinder-ceph'
+
+# Integrate Cinder-Ceph
+- echo -e "\n-------- Integrate Cinder-Ceph... --------\n"
+
+- su ubuntu -c 'juju integrate cinder-ceph:storage-backend cinder:storage-backend'
+- su ubuntu -c 'juju integrate cinder-ceph:ceph ceph-mon:client'
+- su ubuntu -c 'juju integrate cinder-ceph:ceph-access nova-compute:ceph-access'
+
+# Wait for Cinder-Ceph to be ready
+- echo -e "\n-------- Waiting for Cinder-Ceph to be ready... --------\n"
+
+- su ubuntu -c "juju wait-for application cinder-ceph --query='life==\"alive\" && status==\"active\"'"
+
+# ---------------------------------------------- Deploy Ceph RADOS Gateway ----------------------------------------------
+- echo -e "\n-------- Deploying Ceph RADOS Gateway... --------\n"
+
+- su ubuntu -c 'juju deploy --to lxd:0 --channel $CEPH_RADOSGW_VERSION ceph-radosgw'
+
+# Integrate Ceph RADOS Gateway
+- echo -e "\n-------- Integrate Ceph RADOS Gateway... --------\n"
+
+- su ubuntu -c 'juju integrate ceph-radosgw:mon ceph-mon:radosgw'
+
+# Wait for Ceph RADOS Gateway to be ready
+- echo -e "\n-------- Waiting for Ceph RADOS Gateway to be ready... --------\n"
+
+- su ubuntu -c "juju wait-for application ceph-radosgw --timeout=20m --query='life==\"alive\" && status==\"active\"'"
+
+# --------------------------------------- Wait for OpenStack to Finish Deploying ---------------------------------------
+- echo -e "\n-------- Wait for OpenStack to finish deploying... --------\n"
+
+- su ubuntu -c "juju wait-for model openstack --query='life==\"alive\" && status==\"available\" && forEach(applications, app => app.status == \"active\")'"
+
+# ---------------------------------------------------- Set openrc ----------------------------------------------------
+- echo -e "\n-------- Set openrc... --------\n"
+
+- |
+  cat <<'EOF' > /home/ubuntu/openrc
+  # Navigate Juju 2.9/3.x
+  JUJU_VERSION=$(juju version | cut -c 1)
+
+  if [ $JUJU_VERSION -eq 2 ]; then
+      RUN="run"
+  else
+      RUN="exec"
+  fi
+
+  # Place the cloud's CA certificate in a file readable by the openstackclients snap
+  _snap_user_dir=~/snap/openstackclients/common
+  if [ ! -d $_snap_user_dir ]; then
+      mkdir -p $_snap_user_dir
+  fi
+  _root_ca=$_snap_user_dir/root-ca.crt
+  juju ${RUN} -u vault/leader -- 'leader-get root-ca' | tee $_root_ca >/dev/null 2>&1
+
+  # Find an IP address for Keystone
+  _keystone_vip=$(juju config keystone vip)
+  if [ -n "$_keystone_vip" ]; then
+      _keystone_ip=$(echo $_keystone_vip | awk '{print $1}')
+  else
+      _keystone_ip=$(juju ${RUN} -u keystone/leader -- 'network-get --bind-address public')
+  fi
+
+  # Query for the Keystone admin password
+  _password=$(juju ${RUN} -u keystone/leader -- 'leader-get admin_passwd')
+
+  # Unset possible undercloud environment variables
+  unset "${!OS_*}"
+
+  # Set the OpenStack environment variables
+  export OS_AUTH_PROTOCOL=https
+  export OS_CACERT=${_root_ca}
+  export OS_AUTH_URL=${OS_AUTH_PROTOCOL:-http}://${_keystone_ip}:5000/v3
+  export OS_USERNAME=admin
+  export OS_PASSWORD=${_password}
+  export OS_USER_DOMAIN_NAME=admin_domain
+  export OS_PROJECT_DOMAIN_NAME=admin_domain
+  export OS_PROJECT_NAME=admin
+  export OS_REGION_NAME=RegionOne
+  export OS_IDENTITY_API_VERSION=3
+  # Swift needs this
+  export OS_AUTH_VERSION=3
+  # Gnocchi needs this
+  export OS_AUTH_TYPE=password
+
+  echo "To print the values to screen (including the admin password):"
+  echo
+  echo "   env | grep OS_"
+  EOF
+  
+- chown ubuntu:ubuntu /home/ubuntu/openrc
+
+# --------------------------------------------- Configure OpenStack ---------------------------------------------
+- echo -e "\n-------- Configure OpenStack... --------\n"
+
+- |
+  cat <<EOF > /home/ubuntu/openstack-config.sh
+  #!/bin/bash
+
+  # Source openrc and print env variables
+  echo -e "\n-------- Source openrc... --------\n"
+
+  source ~/openrc
+  env | grep OS_
+
+  # Confirm the user environment
+  openstack endpoint list --interface admin
+
+  # ------------------------------------------- Download image and set Flavor -------------------------------------------
+  echo -e "\n-------- Download Jammy image... --------\n"
+
+  mkdir ~/cloud-images
+  wget -nv http://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img -O ~/cloud-images/jammy-amd64.img
+
+  # Import image into Glance
+  echo -e "\n-------- Import Jammy image into Glance... --------\n"
+
+  openstack image create --public --container-format bare --disk-format qcow2 --file ~/cloud-images/jammy-amd64.img jammy-amd64
+
+  # Create a flavor
+  echo -e "\n-------- Create a Flavor... --------\n"
+
+  openstack flavor create --ram $FLAVOR_RAM --disk $FLAVOR_DISK --ephemeral $FLAVOR_E_DISK m1
+
+  # --------------------------------------------- Set up public networking ---------------------------------------------
+  echo -e "\n-------- Set up public networking... --------\n"
+
+  # Create an external public (shared) network called ‘ext_net’
+  openstack network create --external --share --provider-network-type flat --provider-physical-network physnet1 ext_net
+
+  # Create the subnet called ‘ext_subnet’
+  openstack subnet create --network ext_net --no-dhcp --gateway $GATEWAY --subnet-range $SUBNET --allocation-pool start=$OS_RESERVED_IP_START,end=$OS_RESERVED_IP_END ext_subnet
+  EOF
+
+- chown ubuntu:ubuntu /home/ubuntu/openstack-config.sh
+- chmod 755 /home/ubuntu/openstack-config.sh
+
+- su ubuntu -c '/home/ubuntu/openstack-config.sh'
+
+# --------------------------------------------- Set up reverse nginx proxy ---------------------------------------------
+#- echo -e "\n-------- Set up reverse nginx proxy... --------\n"
+
+# Obtain Horizon Dashboard IP address
+#- export HORIZON_IP=$(su ubuntu -c 'juju show-unit openstack-dashboard/0 --format json' | jq -r '."openstack-dashboard/0"."public-address"')
+
+#- |
+#  cat <<EOF > /etc/nginx/sites-available/horizon_proxy
+#  server {
+#    listen 80;
+#    server_name $IP_ADDRESS;
+#    
+#    location = / {
+#      return 302 /horizon/;
+#    }
+#    
+#    location /horizon/ {
+#      proxy_pass http://${HORIZON_IP}/horizon/;
+#      proxy_set_header Host \$host;
+#      proxy_set_header X-Real-IP \$remote_addr;
+#      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+#      proxy_set_header X-Forwarded-Proto \$scheme;
+#      proxy_redirect http://${HORIZON_IP}/horizon/ /horizon/;
+#      proxy_redirect default;
+#      
+#      proxy_http_version 1.1;
+#      proxy_set_header Upgrade \$http_upgrade;
+#      proxy_set_header Connection "upgrade";
+#    }
+#    
+#    location /static/ {
+#      proxy_pass http://${HORIZON_IP}/static/;
+#      proxy_set_header Host \$host;
+#      proxy_set_header X-Real-IP \$remote_addr;
+#      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+#      proxy_set_header X-Forwarded-Proto \$scheme;
+#    }
+#    
+#    location /websockify {
+#      proxy_pass http://${HORIZON_IP}/websockify;
+#      proxy_http_version 1.1;
+#      proxy_set_header Upgrade \$http_upgrade;
+#      proxy_set_header Connection "upgrade";
+#      proxy_set_header Host \$host;
+#      proxy_set_header X-Real-IP \$remote_addr;
+#    }
+#  }
+#  EOF
+
+# Enable Reverse Proxy
+#- ln -s /etc/nginx/sites-available/horizon_proxy /etc/nginx/sites-enabled/horizon_proxy
+#- rm /etc/nginx/sites-enabled/default
+#- nginx -t
+#- systemctl start nginx
+
+# Prevent SSL to be enforced and disable secure cookies
+#- echo -e "\n-------- Disabling secure cookies on dashboard... --------\n"
+
+#- su ubuntu -c 'juju config openstack-dashboard enforce-ssl=false'
+#- su ubuntu -c "juju ssh openstack-dashboard/leader \"echo -e '\nSESSION_COOKIE_SECURE = False\nCSRF_COOKIE_SECURE = False' | sudo tee -a /etc/openstack-dashboard/local_settings.py && sudo systemctl restart apache2\""
+
+- echo -e "\n-------- OpenStack finished deploying, have fun!... --------\n"
+

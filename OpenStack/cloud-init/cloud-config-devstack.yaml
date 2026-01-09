@@ -1,0 +1,74 @@
+#cloud-config
+ssh_import_id: ['lp:pgdg99']
+ssh_genkeytypes: [ed25519]
+
+write_files:
+- path: /etc/profile.d/default-editor.sh
+  permissions: '0644'
+  content: |
+    export EDITOR=nvim
+
+- path: /etc/sudoers.d/keep-editor
+  permissions: '0440'
+  content: |
+    Defaults env_keep += "EDITOR"
+
+package_update: true
+package_upgrade: true
+package_reboot_if_required: true
+
+packages:
+  - git
+  - neovim
+  - pollinate
+
+timezone: America/Bogota
+
+random_seed:
+  command: [pollinate]
+  command_required: true
+  file: /dev/urandom
+
+users:
+- default
+- name: stack
+  shell: /bin/bash
+  homedir: /opt/stack
+  sudo: "ALL=(ALL) NOPASSWD: ALL"
+
+runcmd:
+
+# Export variables
+- echo -e "\n-------- Exporting variables... --------\n"
+
+- export ADMIN_PASSWORD=admin
+- export DATABASE_PASSWORD=$ADMIN_PASSWORD
+- export RABBIT_PASSWORD=$ADMIN_PASSWORD
+- export SERVICE_PASSWORD=$ADMIN_PASSWORD
+
+- chmod +x /opt/stack
+
+# Clone devstack repo
+- echo -e "\n-------- Cloning DevStack Repository... --------\n"
+
+- su stack -c 'git clone https://opendev.org/openstack/devstack /opt/stack/devstack'
+
+- |
+  cat <<EOF > /opt/stack/devstack/local.conf
+  [[local|localrc]]
+  ADMIN_PASSWORD=$ADMIN_PASSWORD
+  DATABASE_PASSWORD=$DATABASE_PASSWORD
+  RABBIT_PASSWORD=$RABBIT_PASSWORD
+  SERVICE_PASSWORD=$SERVICE_PASSWORD
+  EOF
+
+- chown stack:stack /opt/stack/devstack/local.conf
+
+# Install devstack
+- echo -e "\n-------- Installing DevStack... --------\n"
+
+- su -l stack -c '~/devstack/stack.sh'
+
+- echo -e "\n-------- DevStack finished deploying, have fun!... --------\n"
+
+

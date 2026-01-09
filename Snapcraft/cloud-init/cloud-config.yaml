@@ -1,0 +1,52 @@
+#cloud-config
+ssh_import_id: ['lp:pgdg99']
+ssh_genkeytypes: [ed25519]
+
+write_files:
+- path: /etc/profile.d/default-editor.sh
+  permissions: '0644'
+  content: |
+    export EDITOR=nvim
+
+- path: /etc/sudoers.d/keep-editor
+  permissions: '0440'
+  content: |
+    Defaults env_keep += "EDITOR"
+
+package_update: true
+package_upgrade: true
+package_reboot_if_required: true
+
+snap:
+  commands:
+  - snap install snapcraft --classic
+
+packages:
+  - git
+  - neovim
+  - pollinate
+
+timezone: America/Bogota
+
+random_seed:
+  command: [pollinate]
+  command_required: true
+  file: /dev/urandom
+
+runcmd:
+
+# Create Snapcraft credentials file
+- echo -e "\n-------- Creating Snapcraft Credentials File... --------\n"
+
+- |
+  cat <<EOF > /home/ubuntu/snapcraft-credentials
+  [INSERT YOUR CREDENTIALS HERE]
+  EOF
+
+- chown ubuntu:ubuntu /home/ubuntu/snapcraft-credentials
+
+# Add Snapcraft credentials file to bashrc
+- echo -e "\n-------- Adding Snapcraft Credentials File to bashrc... --------\n"
+
+- echo 'export SNAPCRAFT_STORE_CREDENTIALS=$(cat $HOME/snapcraft-credentials)' >> /home/ubuntu/.bashrc
+

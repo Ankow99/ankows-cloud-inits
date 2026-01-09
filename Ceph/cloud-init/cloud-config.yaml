@@ -1,0 +1,396 @@
+#cloud-config
+ssh_import_id: ['lp:pgdg99']
+ssh_genkeytypes: [ed25519]
+
+write_files:
+- path: /etc/netplan/60-lxdbr0.yaml
+  permissions: '0600'
+  content: |
+    network:
+      version: 2
+      bridges:
+        lxdbr0:
+          addresses: [10.10.20.1/24]
+          parameters:
+            stp: false
+            forward-delay: 0
+
+- path: /etc/sysctl.d/99-maas-nat.conf
+  content: |
+    net.ipv4.ip_forward=1
+
+- path: /etc/profile.d/default-editor.sh
+  permissions: '0644'
+  content: |
+    export EDITOR=nvim
+
+- path: /etc/sudoers.d/keep-editor
+  permissions: '0440'
+  content: |
+    Defaults env_keep += "EDITOR"
+
+lxd:
+  preseed: |
+    config:
+      core.https_address: '[::]:8444'
+      core.trust_password: password
+    storage_pools:
+    - config:
+        size: 270GB
+      description: ""
+      name: default
+      driver: zfs 
+    profiles:
+    - config: {}
+      description: ""
+      devices:
+        root:
+          path: /
+          pool: default
+          type: disk
+      name: default
+    projects: []
+    cluster: null
+
+apt:
+  sources:
+    source1:
+      source: ppa:maas/3.6
+
+snap:
+  commands:
+  - snap install juju
+
+packages:
+  - git
+  - neovim
+  - pollinate
+  - jq
+  - iptables-persistent
+
+package_update: true
+package_upgrade: true
+package_reboot_if_required: true
+
+timezone: America/Bogota
+
+random_seed:
+  command: [pollinate]
+  command_required: true
+  file: /dev/urandom
+
+runcmd:
+
+# Export variables
+- echo -e "\n-------- Exporting variables... --------\n"
+
+- export SSH_KEY=lp:pgdg99
+
+- export ADMIN_USER=admin
+- export ADMIN_PASS=admin
+- export ADMIN_EMAIL=admin@mail.com
+
+- export GATEWAY=10.10.20.1
+- export SUBNET=10.10.20.0/24
+
+- export MAAS_DNS=8.8.8.8
+- export MAAS_RESERVED_IP_START=10.10.20.200
+- export MAAS_RESERVED_IP_END=10.10.20.254
+
+- export JUJU_CONTROLLER_CPU=3
+- export JUJU_CONTROLLER_RAM=8192
+- export JUJU_CONTROLLER_DISK=20
+
+- export NODE_CPU=2
+- export NODE_RAM=8192
+- export NODE_MAIN_DISK=10
+- export NODE_OSD_DISK_1=20
+- export NODE_OSD_DISK_2=20
+- export NODE_OSD_DISK_3=20
+
+- export MON_CPU=2
+- export MON_RAM=4096
+- export MON_DISK=20
+
+- export CEPH_VERSION=squid/stable
+
+- export CEPH_OSD_VERSION=$CEPH_VERSION
+- export CEPH_MON_VERSION=$CEPH_VERSION
+- export CEPH_FS_VERSION=$CEPH_VERSION
+- export CEPH_DASHBOARD_VERSION=$CEPH_VERSION
+
+- export IP_ADDRESS=$(ip -j route show default | jq -r '.[].prefsrc')
+- export INTERFACE=$(ip -j route show default | jq -r '.[].dev')
+
+# Make the bridge active on the first boot
+- echo -e "\n-------- Applying and attaching network bridge... --------\n"
+
+- netplan apply
+
+# Attach lxdbr0 bridge to LXD default profile
+- lxc network attach-profile lxdbr0 default
+
+# Fetch IPv4 address from the device, setup forwarding and NAT
+- echo -e "\n-------- Configuring Port Forwarding and NAT... --------\n"
+
+- sysctl -p /etc/sysctl.d/99-maas-nat.conf
+- iptables -t nat -A POSTROUTING -o $INTERFACE -j SNAT --to $IP_ADDRESS
+
+# Persist NAT configuration
+- netfilter-persistent save
+
+# Install MAAS now that LXD and networking are configured
+- echo -e "\n-------- Installing MAAS... --------\n"
+
+- apt-get update
+- apt-get remove -y systemd-timesyncd
+- apt-get install -y maas
+
+# Initialise MAAS
+- echo -e "\n-------- Initializing MAAS... --------\n"
+
+- maas init --admin-username $ADMIN_USER --admin-password $ADMIN_PASS --admin-email $ADMIN_EMAIL --admin-ssh-import $SSH_KEY --rbac-url "" --candid-agent-file ""
+
+# Wait for MAAS services to be ready
+- |
+  echo -e "\n-------- Waiting for MAAS API to be ready... --------\n"
+  
+  until maas login $ADMIN_USER 'http://localhost:5240/MAAS/' $(maas apikey --username $ADMIN_USER) > /dev/null 2>&1; do
+    echo "MAAS is not ready yet (502). Retrying in 30 seconds..."
+    sleep 30
+  done
+
+# Grab API key and login as admin
+- echo -e "\n-------- Logging in as admin user... --------\n"
+
+- export APIKEY=$(maas apikey --username $ADMIN_USER)
+- maas login $ADMIN_USER 'http://localhost:5240/MAAS/' $APIKEY
+
+- maas $ADMIN_USER maas set-config name=maas_name value=maas name=completed_intro value=true
+
+# Automatically create and add ssh keys to MAAS
+- echo -e "\n-------- Generating SSH keys and adding them to MAAS... --------\n"
+
+- ssh-keygen -q -t rsa -N "" -f "/home/ubuntu/.ssh/id_rsa"
+- chown ubuntu:ubuntu /home/ubuntu/.ssh/id_rsa /home/ubuntu/.ssh/id_rsa.pub
+- chmod 600 /home/ubuntu/.ssh/id_rsa
+- chmod 644 /home/ubuntu/.ssh/id_rsa.pub
+- maas $ADMIN_USER sshkeys create key="$(cat /home/ubuntu/.ssh/id_rsa.pub)"
+
+# Configure MAAS networking (set gateways, vlans, DHCP on etc)
+- echo -e "\n-------- Configuring MAAS networking... --------\n"
+
+- export FABRIC_ID=$(maas $ADMIN_USER subnet read "$SUBNET" | jq -r ".vlan.fabric_id")
+- export VLAN_TAG=$(maas $ADMIN_USER subnet read "$SUBNET" | jq -r ".vlan.vid")
+- export PRIMARY_RACK=$(maas $ADMIN_USER rack-controllers read | jq -r ".[] | .system_id")
+
+- maas $ADMIN_USER subnet update $SUBNET gateway_ip=$GATEWAY
+- maas $ADMIN_USER ipranges create type=dynamic start_ip=$MAAS_RESERVED_IP_START end_ip=$MAAS_RESERVED_IP_END
+- maas $ADMIN_USER vlan update $FABRIC_ID $VLAN_TAG dhcp_on=true primary_rack=$PRIMARY_RACK
+- maas $ADMIN_USER maas set-config name=upstream_dns value=$MAAS_DNS
+
+# Configure boot images
+- echo -e "\n-------- Configuring MAAS boot images... --------\n"
+
+#- maas $ADMIN_USER boot-sources create url=$URL keyring_filename=$KEYRING_FILE
+- export BOOT_SOURCE_ID=$(maas $ADMIN_USER boot-sources read | jq -r '.[0].id')
+
+- maas $ADMIN_USER boot-source-selections create $BOOT_SOURCE_ID os="ubuntu" release="noble" arches="amd64" labels='*' subarches='*'
+- maas $ADMIN_USER boot-source-selections create $BOOT_SOURCE_ID os="ubuntu" release="jammy" arches="amd64" labels='*' subarches='*'
+
+- maas $ADMIN_USER boot-resources import
+
+# Wait for MAAS boot images to be ready
+- sleep 90
+
+# Add LXD as a VM host for MAAS
+- echo -e "\n-------- Adding LXD as VM host in MAAS... --------\n"
+
+- maas $ADMIN_USER vm-hosts create type=lxd power_address=https://${IP_ADDRESS}:8444 password=password name=LXD project=maas
+- export VM_HOST_ID=$(maas $ADMIN_USER vm-hosts read | jq -r '.[0].id')
+
+# Compose VMs using VM host (-c limits.cpu=15 -c limits.memory=44GiB --device root,size=260GiB)
+- echo -e "\n-------- Composing VM(s) using LXD... --------\n"
+
+- export SYSTEM_ID_1=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$JUJU_CONTROLLER_CPU memory=$JUJU_CONTROLLER_RAM storage=$JUJU_CONTROLLER_DISK hostname=controller | jq -r '.system_id')
+
+- export SYSTEM_ID_2=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage="root:$NODE_MAIN_DISK,disk1:$NODE_OSD_DISK_1,disk2:$NODE_OSD_DISK_2,disk3:$NODE_OSD_DISK_3" hostname=osd1 | jq -r '.system_id')
+
+- export SYSTEM_ID_3=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage="root:$NODE_MAIN_DISK,disk1:$NODE_OSD_DISK_1,disk2:$NODE_OSD_DISK_2,disk3:$NODE_OSD_DISK_3" hostname=osd2 | jq -r '.system_id')
+
+- export SYSTEM_ID_4=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage="root:$NODE_MAIN_DISK,disk1:$NODE_OSD_DISK_1,disk2:$NODE_OSD_DISK_2,disk3:$NODE_OSD_DISK_3" hostname=osd3 | jq -r '.system_id')
+
+- export SYSTEM_ID_5=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$MON_CPU memory=$MON_RAM storage=$MON_DISK hostname=mon1 | jq -r '.system_id')
+
+- export SYSTEM_ID_6=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$MON_CPU memory=$MON_RAM storage=$MON_DISK hostname=mon2 | jq -r '.system_id')
+
+- export SYSTEM_ID_7=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$MON_CPU memory=$MON_RAM storage=$MON_DISK hostname=mon3 | jq -r '.system_id')
+
+# Wait for VMs to be ready
+- |
+  echo "Waiting for VMs to enter 'Ready' state..."
+  
+  # Aggregate the IDs from your previous exports
+  IDS="$SYSTEM_ID_1 $SYSTEM_ID_2 $SYSTEM_ID_3 $SYSTEM_ID_4 $SYSTEM_ID_5 $SYSTEM_ID_6 $SYSTEM_ID_7"
+  
+  # Safety check: Ensure we actually have IDs to check
+  if [ -z "$(echo "$IDS" | tr -d ' ')" ]; then
+    echo "Error: No System IDs found. Exports may not have persisted."
+    exit 1
+  fi
+
+  # Start the loop
+  while true; do
+    all_ready=true
+    
+    for id in $IDS; do
+      # Query MAAS for the status name (requires jq)
+      status=$(maas $ADMIN_USER machine read "$id" | jq -r '.status_name')
+      echo "  Machine $id is currently '$status'..."
+      # If any machine is NOT ready, we mark the flag as false
+      if [ "$status" != "Ready" ]; then
+         all_ready=false
+      fi
+    done
+
+    # If the flag is still true, everyone is ready -> break the loop
+    if [ "$all_ready" = true ]; then
+      echo "All VMs are Ready!"
+      break
+    fi
+
+    # Wait 30 seconds before checking again
+    echo "Waiting 60s before checking again..."
+    sleep 60
+  done
+
+# Create tags and add them to commissioned machines
+- echo -e "\n-------- Creating and adding Tags... --------\n"
+
+- maas $ADMIN_USER tags create name=juju
+- maas $ADMIN_USER tag update-nodes juju add=$SYSTEM_ID_1
+
+- maas $ADMIN_USER tags create name=osd
+- maas $ADMIN_USER tag update-nodes osd add=$SYSTEM_ID_2
+- maas $ADMIN_USER tag update-nodes osd add=$SYSTEM_ID_3
+- maas $ADMIN_USER tag update-nodes osd add=$SYSTEM_ID_4
+
+- maas $ADMIN_USER tags create name=mon
+- maas $ADMIN_USER tag update-nodes mon add=$SYSTEM_ID_5
+- maas $ADMIN_USER tag update-nodes mon add=$SYSTEM_ID_6
+- maas $ADMIN_USER tag update-nodes mon add=$SYSTEM_ID_7
+
+# Create MAAS Juju Cloud configuration files
+- echo -e "\n-------- Creating MAAS Juju Cloud Configs... --------\n"
+
+- |
+  cat <<EOF > /home/ubuntu/maas-cloud.yaml
+  clouds:
+    maas:
+      type: maas
+      auth-types: [oauth1]
+      endpoint: http://${IP_ADDRESS}:5240/MAAS
+  EOF
+
+- |
+  cat <<EOF > /home/ubuntu/maas-creds.yaml
+  credentials:
+    maas:
+      anyuser:
+        auth-type: oauth1
+        maas-oauth: $APIKEY
+  EOF
+
+- chown ubuntu:ubuntu /home/ubuntu/maas-*.yaml
+
+# Add MAAS as a Juju Cloud
+- echo -e "\n-------- Adding MAAS as a Juju Cloud... --------\n"
+
+- su ubuntu -c 'juju add-cloud --client -f ~/maas-cloud.yaml maas'
+
+# Add MAAS as a Juju Cloud
+- echo -e "\n-------- Adding MAAS Credentials to Juju... --------\n"
+
+- su ubuntu -c 'juju add-credential --client -f ~/maas-creds.yaml maas'
+
+# Remove config files
+- rm /home/ubuntu/maas-*.yaml
+
+# Bootstrap Juju controller
+- echo -e "\n-------- Bootstrapping Juju Controller... --------\n"
+
+- su ubuntu -c 'juju bootstrap --constraints tags=juju maas juju-controller'
+
+
+# ---------------------------------------------- DEPLOY CHARMED CEPH ----------------------------------------------
+
+
+# Create Juju Model
+- echo -e "\n-------- Creating Juju Ceph Model... --------\n"
+
+- su ubuntu -c 'juju add-model --config default-series=jammy ceph'
+
+# ------------------------------------------------- Deploy Ceph OSD -------------------------------------------------
+- echo -e "\n-------- Deploying Ceph OSD... --------\n"
+
+- |
+  cat <<EOF > /home/ubuntu/ceph-osd.yaml
+  ceph-osd:
+    osd-devices: /dev/sdb /dev/sdc /dev/sdd
+  EOF
+  
+- chown ubuntu:ubuntu /home/ubuntu/ceph-osd.yaml
+
+- su ubuntu -c 'juju deploy -n 3 --channel $CEPH_OSD_VERSION --config ~/ceph-osd.yaml --constraints tags=osd ceph-osd'
+
+- rm /home/ubuntu/ceph-osd.yaml
+
+# Wait for Ceph OSD to be deployed
+- echo -e "\n-------- Waiting for Ceph OSD to be deployed... --------\n"
+
+- su ubuntu -c "juju wait-for application ceph-osd --timeout=20m --query='life==\"alive\" && status==\"blocked\" && len(units) == 3'"
+
+# ---------------------------------------------- Deploy Ceph Monitor ----------------------------------------------
+- echo -e "\n-------- Deploying Ceph Monitor... --------\n"
+
+- |
+  cat <<EOF > /home/ubuntu/ceph-mon.yaml
+  ceph-mon:
+    expected-osd-count: 9
+    monitor-count: 3
+  EOF
+
+- chown ubuntu:ubuntu /home/ubuntu/ceph-mon.yaml
+
+- su ubuntu -c 'juju deploy -n 3 --channel $CEPH_MON_VERSION --config ~/ceph-mon.yaml --constraints tags=mon ceph-mon'
+
+- rm /home/ubuntu/ceph-mon.yaml
+
+# Integrate Ceph Monitor
+- echo -e "\n-------- Integrate Ceph Monitor... --------\n"
+
+- su ubuntu -c 'juju integrate ceph-mon:osd ceph-osd:mon'
+
+# Wait for Ceph Monitor to be ready
+- echo -e "\n-------- Waiting for Ceph Monitor to be ready... --------\n"
+
+- su ubuntu -c "juju wait-for application ceph-mon --timeout=20m --query='life==\"alive\" && status==\"active\" && len(units) == 3'"
+
+# ---------------------------------------------- Deploy Ceph Filesystem ----------------------------------------------
+- echo -e "\n-------- Deploying Ceph Filesystem... --------\n"
+
+- su ubuntu -c 'juju deploy -n 3 --to lxd:3,lxd:4,lxd:5 --channel $CEPH_FS_VERSION --constraints tags=mon ceph-fs'
+
+# Integrate Ceph Filesystem
+- echo -e "\n-------- Integrate Ceph Filesystem... --------\n"
+
+- su ubuntu -c 'juju integrate ceph-fs:ceph-mds ceph-mon:mds'
+
+# Wait for Ceph Filesystem to be ready
+- echo -e "\n-------- Waiting for Ceph Filesystem to be ready... --------\n"
+
+- su ubuntu -c "juju wait-for application ceph-fs --timeout=20m --query='life==\"alive\" && status==\"active\" && len(units) == 3'"
+
+
+- echo -e "\n-------- Ceph finished deploying, have fun!... --------\n"
+

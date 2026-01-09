@@ -1,0 +1,178 @@
+#cloud-config
+ssh_import_id: ['lp:pgdg99']
+ssh_genkeytypes: [ed25519]
+
+write_files:
+- path: /etc/postgresql/16/main/conf.d/99-cloud-init.conf
+  content: |
+    listen_addresses = '*'
+    max_connections = 100
+    max_prepared_transactions = 100
+
+- path: /etc/rabbitmq/rabbitmq-env.conf
+  content: |
+    NODE_IP_ADDRESS=127.0.0.1
+
+- path: /etc/profile.d/default-editor.sh
+  permissions: '0644'
+  content: |
+    export EDITOR=nvim
+
+- path: /etc/sudoers.d/keep-editor
+  permissions: '0440'
+  content: |
+    Defaults env_keep += "EDITOR"
+
+package_update: true
+package_upgrade: true
+package_reboot_if_required: true
+
+hostname: server
+create_hostname_file: true
+fqdn: server.landscape.com
+prefer_fqdn_over_hostname: true
+
+snap:
+  commands:
+  - snap install certbot --classic
+
+apt:
+  sources:
+    source1:
+      source: ppa:landscape/latest-stable
+
+packages:
+  - git
+  - neovim
+  - pollinate
+  - jq
+  - ca-certificates
+  - postgresql
+  - postgresql-16-debversion
+  - postgresql-plpython3-16
+  - postgresql-contrib
+  - landscape-server
+  - rabbitmq-server
+  - apache2
+
+timezone: America/Bogota
+
+random_seed:
+  command: [pollinate]
+  command_required: true
+  file: /dev/urandom
+
+runcmd:
+
+# Export variables
+- echo -e "\n-------- Exporting variables... --------\n"
+
+- export USERNAME=landscape_superuser
+- export PASSWORD=admin
+
+- export IP_ADDRESS=$(ip -j route show default | jq -r '.[].prefsrc')
+- export FQDN=$(hostname -f)
+- export SECRET_TOKEN=$(openssl rand -base64 128 | tr -d '\n')
+- export DEBIAN_FRONTEND=noninteractive
+
+# Create a superuser Landscape can use
+- echo -e "\n-------- Creating Landscape Superuser... --------\n"
+
+#- su postgres createuser --createdb --createrole --superuser --no-password landscape_superuser
+- sudo -u postgres psql -c "CREATE ROLE $USERNAME WITH SUPERUSER CREATEDB CREATEROLE LOGIN PASSWORD '$PASSWORD';"
+
+# Configure PostgreSQL
+- echo -e "\n-------- Configuring PostgreSQL... --------\n"
+
+- echo "host all landscape,landscape_maintenance,landscape_superuser ${IP_ADDRESS}/32 md5" >> /etc/postgresql/16/main/pg_hba.conf
+
+- systemctl restart postgresql
+
+# Configure rabbitmq
+- echo -e "\n-------- Configuring RabbitMQ... --------\n"
+
+- rabbitmqctl add_user landscape $PASSWORD
+- rabbitmqctl add_vhost landscape
+- rabbitmqctl set_permissions -p landscape landscape ".*" ".*" ".*"
+- rabbitmqctl add_vhost landscape-hostagent
+- rabbitmqctl set_permissions -p landscape-hostagent landscape ".*" ".*" ".*"
+
+- systemctl restart rabbitmq-server
+
+# Configure database and broker access
+- echo -e "\n-------- Configuring database and broker access... --------\n"
+
+- |
+  python3 -c "
+  import configparser
+  config = configparser.ConfigParser()
+  config.read('/etc/landscape/service.conf')
+
+  # Section [stores]
+  if 'stores' not in config: config.add_section('stores')
+  config['stores']['host'] = '$IP_ADDRESS'
+  config['stores']['password'] = '$PASSWORD'
+
+  # Section [broker]
+  if 'broker' not in config: config.add_section('broker')
+  config['broker']['password'] = '$PASSWORD'
+
+  # Section [schema]
+  if 'schema' not in config: config.add_section('schema')
+  config['schema']['store_user'] = '$USERNAME'
+  config['schema']['store_password'] = '$PASSWORD'
+
+  # Section [landscape]
+  if 'appserver' not in config: config.add_section('appserver')
+  config['appserver']['secret_token'] = '$SECRET_TOKEN'
+
+  with open('/etc/landscape/service.conf', 'w') as configfile:
+      config.write(configfile)
+  "
+
+# Enable Landscape Services
+- echo -e "\n-------- Enabling RUN_ALL in defaults... --------\n"
+
+- sed -i 's/^RUN_ALL.*/RUN_ALL="yes"/' /etc/default/landscape-server
+
+# Configure Apache
+- echo -e "\n-------- Configuring Apache Web Server... --------\n"
+
+# Copy the official template included in the package
+- cp /opt/canonical/landscape/standalone/templates/apache_default.tmpl /etc/apache2/sites-available/landscape.conf
+
+# Replace ${hostname} with the FQDN variable
+- sed -i "s/\${hostname}/$FQDN/g" /etc/apache2/sites-available/landscape.conf
+
+# Replace ${ssl_certificate_crt} with Snakeoil Cert
+- sed -i "s|\${ssl_certificate_crt}|/etc/ssl/certs/ssl-cert-snakeoil.pem|g" /etc/apache2/sites-available/landscape.conf
+
+# Replace ${ssl_certificate_key} with Snakeoil Key
+- sed -i "s|\${ssl_certificate_key}|/etc/ssl/private/ssl-cert-snakeoil.key|g" /etc/apache2/sites-available/landscape.conf
+
+# Comment out Chain File (we don't have one for snakeoil)
+- sed -i "s|^\s*SSLCertificateChainFile|# SSLCertificateChainFile|g" /etc/apache2/sites-available/landscape.conf
+
+# Enable required modules
+- for module in rewrite proxy_http ssl headers expires proxy_http2; do a2enmod $module; done
+
+# Disable mod-status
+- a2dismod status
+
+# Disable the default http vhost
+- a2dissite 000-default
+
+# Enable new site
+- a2ensite landscape.conf
+- systemctl restart apache2
+
+# Run the Landscape setup script
+- echo -e "\n-------- Running Landscape Setup Script... --------\n"
+
+- setup-landscape-server
+
+# Start Landscape services
+- echo -e "\n-------- Starting Landscape... --------\n"
+
+- lsctl restart
+

@@ -1,0 +1,77 @@
+#cloud-config
+ssh_import_id: ['lp:pgdg99']
+ssh_genkeytypes: [ed25519]
+
+write_files:
+- path: /etc/profile.d/default-editor.sh
+  permissions: '0644'
+  content: |
+    export EDITOR=nvim
+
+- path: /etc/sudoers.d/keep-editor
+  permissions: '0440'
+  content: |
+    Defaults env_keep += "EDITOR"
+
+package_update: true
+package_upgrade: true
+package_reboot_if_required: true
+
+hostname: client
+create_hostname_file: true
+fqdn: client.landscape
+prefer_fqdn_over_hostname: true
+
+apt:
+  sources:
+    source1:
+      source: ppa:landscape/latest-stable
+
+packages:
+  - git
+  - neovim
+  - pollinate
+  - jq
+  - landscape-client
+
+timezone: America/Bogota
+
+random_seed:
+  command: [pollinate]
+  command_required: true
+  file: /dev/urandom
+
+runcmd:
+
+# Export variables
+- echo -e "\n-------- Exporting variables... --------\n"
+
+- export ACCOUNT_NAME=standalone
+- export COMPUTER_TITLE=client
+
+- export LANDSCAPE_SERVER_FQDN=server.landscape.com
+- export LANDSCAPE_SERVER_IP=
+
+- export IP_ADDRESS=$(ip -j route show default | jq -r '.[].prefsrc')
+- export FQDN=$(hostname -f)
+- export DEBIAN_FRONTEND=noninteractive
+
+# Add landscape server FQDN to /etc/hosts
+- echo -e "\n-------- Adding Landscape Server FQDN to /etc/hosts... --------\n"
+
+- echo "$LANDSCAPE_IP $LANDSCAPE_FQDN" >> /etc/hosts
+
+# Obtain landscape server self-signed certificate
+- echo -e "\n-------- Obtain Landscape Server Self-Signed CA... --------\n"
+
+- echo -n | openssl s_client -connect $LANDSCAPE_SERVER_IP:443 | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' | tee /etc/landscape/server.pem
+
+# Attach Ubuntu Pro Token
+- pro attach C12NUyK6MQUgNMLZjR4CDW5KX334gx
+
+# Configure Landscape client
+- echo -e "\n-------- Configure Landscape Client... --------\n"
+
+- landscape-config --silent --account-name="${ACCOUNT_NAME}" --computer-title="${COMPUTER_TITLE}" --tags='' --script-users='nobody,landscape,root' --ping-url="http://${LANDSCAPE_SERVER_FQDN}/ping" --url="https://${LANDSCAPE_SERVER_FQDN}/message-system" --ssl-public-key /etc/landscape/server.pem
+
+
