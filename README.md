@@ -21,7 +21,7 @@ The following environments are available in their respective directories:
 
 To use these launchers, your host machine must meet the following requirements:
 
-1.  OS: Linux (Ubuntu recommended)
+1.  OS: Ubuntu (made and tested in 24.04)
 2.  Resources: Not all labs require high amounts of RAM & CPU, but they were made for a 64 GB and 22 CPU workstation.
 3.  LXD: Installed and initialized using the provided preseed
 4.  Dependencies:
