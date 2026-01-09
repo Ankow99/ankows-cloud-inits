@@ -22,8 +22,9 @@ The following environments are available in their respective directories:
 To use these launchers, your host machine must meet the following requirements:
 
 1.  OS: Linux (Ubuntu recommended)
-2.  LXD: Installed and initialized using the provided preseed
-3.  Dependencies:
+2.  Resources: Not all labs require high amounts of RAM & CPU, but they were made for a 64 GB and 22 CPU workstation.
+3.  LXD: Installed and initialized using the provided preseed
+4.  Dependencies:
     * `jq` (Required for parsing JSON output in the launch scripts)
 
 ```bash
@@ -73,7 +74,7 @@ Critical Step: Before running any labs, you must initialize LXD with the specifi
 A preseed file is provided in the `LXD/` folder. This configures:
 * lxdbr0: 10.10.10.1/24 (NAT enabled)
 * mbr0: 10.0.0.1/22 (No DHCP, NAT enabled, used for non-nested MAAS/Infrastructure layers)
-* Storage: 500GiB ZFS pool named `default`.
+* Storage: 500GiB ZFS pool named `default`. (Labs use much less, but some can use up to 250GB at a time)
 * Profiles: A custom `default` profile with standard tools (neovim, git) and a `maas` profile with specific network attachments.
 
 To initialize LXD:
