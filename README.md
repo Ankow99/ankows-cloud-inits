@@ -128,6 +128,8 @@ Example:
 
 The cleanup process depends on whether you are running a standard Nested lab or a Non-Nested lab.
 
+![Nested vs Non-Nested Topology](MAAS/nested-vs-non-nested.png)
+
 #### Standard Labs (Default)
 Most labs use Nested Virtualization. This means the lab runs inside a single "Parent" LXD VM. Any nodes created by MAAS or Juju exist *inside* that parent VM.
 * Cleanup: Simply delete the parent VM. LXD handles the rest.
