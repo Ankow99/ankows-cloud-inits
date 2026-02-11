@@ -1,5 +1,6 @@
 #cloud-config
 ssh_import_id: ['lp:pgdg99']
+ssh_authorized_keys: [ssh-ed25519 AAAAC3...]
 ssh_genkeytypes: [ed25519]
 
 write_files:
@@ -44,7 +45,7 @@ lxd:
       core.trust_password: password
     storage_pools:
     - config:
-        size: 70GB
+        size: 110GB
       description: ""
       name: default
       driver: zfs 
@@ -64,6 +65,10 @@ apt:
   sources:
     source1:
       source: ppa:maas/3.6
+      
+snap:
+  commands:
+  - snap install juju
 
 packages:
   - git
@@ -86,7 +91,7 @@ random_seed:
 runcmd:
 
 # Export variables
-- echo -e "\n-------- Exporting variables... --------\n"
+- echo "\n\n-------- Exporting variables... --------\n"
 
 - export SSH_KEY=lp:pgdg99
 
@@ -98,33 +103,23 @@ runcmd:
 - export SUBNET=10.10.20.0/24
 
 - export MAAS_PROJECT_NAME=$(hostname)
-- export MAAS_DOMAIN_NAME=kubernetes
 - export MAAS_DNS=8.8.8.8
 - export MAAS_RESERVED_IP_START=10.10.20.200
 - export MAAS_RESERVED_IP_END=10.10.20.254
+
+- export JUJU_CONTROLLER_CPU=2
+- export JUJU_CONTROLLER_RAM=8192
+- export JUJU_CONTROLLER_DISK=20
 
 - export NODE_CPU=2
 - export NODE_RAM=4096
 - export NODE_MAIN_DISK=20
 
-- export IP_ADDRESS=$(ip -j route show default | jq -r '.[].prefsrc')
+- export IP_ADDRESS=$(hostname -I | awk '{print $1}')
 - export INTERFACE=$(ip -j route show default | jq -r '.[].dev')
 
 # Make the bridge active on the first boot
-- echo -e "\n-------- Applying and attaching network bridge... --------\n"
-
-- |
-  cat <<EOF > /etc/netplan/99-maas-dns.yaml
-  network:
-    version: 2
-    ethernets:
-      $INTERFACE:
-        nameservers:
-          addresses: [$IP_ADDRESS]
-          search: [$MAAS_DOMAIN_NAME, maas]
-  EOF
-
-- chmod 600 /etc/netplan/99-maas-dns.yaml
+- echo "\n\n-------- Applying and attaching network bridge... --------\n"
 
 - netplan apply
 
@@ -132,7 +127,7 @@ runcmd:
 - lxc network attach-profile lxdbr0 default
 
 # Fetch IPv4 address from the device, setup forwarding and NAT
-- echo -e "\n-------- Configuring Port Forwarding and NAT... --------\n"
+- echo "\n\n-------- Configuring Port Forwarding and NAT... --------\n"
 
 - sysctl -p /etc/sysctl.d/99-maas-nat.conf
 - iptables -t nat -A POSTROUTING -o $INTERFACE -j SNAT --to $IP_ADDRESS
@@ -141,20 +136,19 @@ runcmd:
 - netfilter-persistent save
 
 # Install MAAS now that LXD and networking are configured
-- echo -e "\n-------- Installing MAAS... --------\n"
+- echo "\n\n-------- Installing MAAS... --------\n"
 
 - apt-get update
-- apt-get remove -y systemd-timesyncd
 - apt-get install -y maas
 
 # Initialise MAAS
-- echo -e "\n-------- Initializing MAAS... --------\n"
+- echo "\n\n-------- Initializing MAAS... --------\n"
 
 - maas init --admin-username $ADMIN_USER --admin-password $ADMIN_PASS --admin-email $ADMIN_EMAIL --admin-ssh-import $SSH_KEY --rbac-url "" --candid-agent-file ""
 
 # Wait for MAAS services to be ready
 - |
-  echo -e "\n-------- Waiting for MAAS API to be ready... --------\n"
+  echo "\n\n-------- Waiting for MAAS API to be ready... --------\n"
   
   until maas login $ADMIN_USER 'http://localhost:5240/MAAS/' $(maas apikey --username $ADMIN_USER) > /dev/null 2>&1; do
     echo "MAAS is not ready yet (502). Retrying in 30 seconds..."
@@ -162,7 +156,7 @@ runcmd:
   done
 
 # Grab API key and login as admin
-- echo -e "\n-------- Logging in as admin user... --------\n"
+- echo "\n\n-------- Logging in as admin user... --------\n"
 
 - export APIKEY=$(maas apikey --username $ADMIN_USER)
 - maas login $ADMIN_USER 'http://localhost:5240/MAAS/' $APIKEY
@@ -170,7 +164,7 @@ runcmd:
 - maas $ADMIN_USER maas set-config name=maas_name value=$MAAS_PROJECT_NAME name=completed_intro value=true
 
 # Automatically create and add ssh keys to MAAS
-- echo -e "\n-------- Generating SSH keys and adding them to MAAS... --------\n"
+- echo "\n\n-------- Generating SSH keys and adding them to MAAS... --------\n"
 
 - ssh-keygen -q -t rsa -N "" -f "/home/ubuntu/.ssh/id_rsa"
 - chown ubuntu:ubuntu /home/ubuntu/.ssh/id_rsa /home/ubuntu/.ssh/id_rsa.pub
@@ -178,25 +172,8 @@ runcmd:
 - chmod 644 /home/ubuntu/.ssh/id_rsa.pub
 - maas $ADMIN_USER sshkeys create key="$(cat /home/ubuntu/.ssh/id_rsa.pub)"
 
-# Enable root ssh access and distribute public key to root
-- cp /home/ubuntu/.ssh/id_rsa* /root/.ssh/
-
-- |
-  cat <<EOF > /root/node-deploy-config.yaml
-  #cloud-config
-  disable_root: false
-  users:
-    - default
-    - name: root
-      ssh_authorized_keys:
-        - $(cat /root/.ssh/id_rsa.pub)
-  runcmd:
-    - sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
-    - systemctl reload ssh
-  EOF
-
 # Configure MAAS networking (set gateways, vlans, DHCP on etc)
-- echo -e "\n-------- Configuring MAAS networking... --------\n"
+- echo "\n\n-------- Configuring MAAS networking... --------\n"
 
 - export FABRIC_ID=$(maas $ADMIN_USER subnet read "$SUBNET" | jq -r ".vlan.fabric_id")
 - export VLAN_TAG=$(maas $ADMIN_USER subnet read "$SUBNET" | jq -r ".vlan.vid")
@@ -207,17 +184,8 @@ runcmd:
 - maas $ADMIN_USER vlan update $FABRIC_ID $VLAN_TAG dhcp_on=true primary_rack=$PRIMARY_RACK
 - maas $ADMIN_USER maas set-config name=upstream_dns value=$MAAS_DNS
 
-# Create new MAAS domain
-- echo -e "\n-------- Creating new k8s domain... --------\n"
-
-- export MAAS_DOMAIN_NAME_ID=$(maas $ADMIN_USER domains create name=$MAAS_DOMAIN_NAME | jq -r '.id')
-- maas $ADMIN_USER domain set-default $MAAS_DOMAIN_NAME_ID
-- maas $ADMIN_USER rack-controller update $PRIMARY_RACK domain=$MAAS_DOMAIN_NAME
-
-- netplan apply
-
 # Configure boot images
-- echo -e "\n-------- Configuring MAAS boot images... --------\n"
+- echo "\n\n-------- Configuring MAAS boot images... --------\n"
 
 - export BOOT_SOURCE_ID=$(maas $ADMIN_USER boot-sources read | jq -r '.[0].id')
 
@@ -227,33 +195,77 @@ runcmd:
 - maas $ADMIN_USER boot-resources import
 
 # Wait for MAAS boot images to be ready
-- sleep 90
+- |
+  echo "\n\n-------- Waiting for all MAAS Boot Images to sync... --------\n"
+  
+  while true; do
+    
+    missing_images=false
+
+    importing_status=$(maas $ADMIN_USER boot-resources is-importing)
+
+    # Get the list of images we requested (e.g., "focal jammy noble")
+    requested_releases=$(maas $ADMIN_USER boot-source-selections read $BOOT_SOURCE_ID | jq -r '.[].release')
+
+    # Get the list of images that are actually downloaded and ready
+    downloaded_releases=$(maas $ADMIN_USER boot-resources read | jq -r '.[].name' | sort | uniq)
+
+    # Check if the image has been downloaded
+    for release in $requested_releases; do
+      if echo "$downloaded_releases" | grep -q "$release"; then
+         # Image exists. Now check if import is finished
+         if [ "$importing_status" = "false" ]; then
+             echo "  Image '$release' has downloaded!"
+         else
+             echo "  Image '$release' is currently syncing..."
+             missing_images=true
+         fi
+      else
+         echo "  Image '$release' was not found in boot resources..."
+         missing_images=true
+      fi
+    done
+
+    # Check for missing images
+    if [ "$missing_images" = "false" ]; then
+      clean_list=$(echo "$requested_releases" | tr '\n' ' ')
+      echo "All selected boot images ( $clean_list) are fully synced!"
+      break
+    fi
+
+    # Wait 30 seconds before checking again
+    echo "Some images are missing. Waiting 30s..."
+    sleep 30
+  done
 
 # Add LXD as a VM host for MAAS
-- echo -e "\n-------- Adding LXD as VM host in MAAS... --------\n"
+- echo "\n\n-------- Adding LXD as VM host in MAAS... --------\n"
 
 - maas $ADMIN_USER vm-hosts create type=lxd power_address=https://${IP_ADDRESS}:8444 password=password name=LXD project=$MAAS_PROJECT_NAME
 - export VM_HOST_ID=$(maas $ADMIN_USER vm-hosts read | jq -r '.[0].id')
 
-# Compose VMs using VM host (-c limits.cpu=6 -c limits.memory=12GiB --device root,size=60GiB)
-- echo -e "\n-------- Composing VM(s) using LXD... --------\n"
+# Compose VMs using VM host (-c limits.cpu=10 -c limits.memory=24GiB --device root,size=100GiB)
+- echo "\n\n-------- Composing VM(s) using LXD... --------\n"
 
-- export SYSTEM_ID_1=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=server domain=$MAAS_DOMAIN_NAME_ID | jq -r '.system_id')
+- export SYSTEM_ID_1=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$JUJU_CONTROLLER_CPU memory=$JUJU_CONTROLLER_RAM storage=$JUJU_CONTROLLER_DISK hostname=controller | jq -r '.system_id') && echo $SYSTEM_ID_1
 
-- export SYSTEM_ID_2=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node-0 domain=$MAAS_DOMAIN_NAME_ID | jq -r '.system_id')
+- export SYSTEM_ID_2=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node1 | jq -r '.system_id') && echo $SYSTEM_ID_2
 
-- export SYSTEM_ID_3=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node-1 domain=$MAAS_DOMAIN_NAME_ID | jq -r '.system_id')
+- export SYSTEM_ID_3=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node2 | jq -r '.system_id') && echo $SYSTEM_ID_3
+
+- export SYSTEM_ID_4=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node3 | jq -r '.system_id') && echo $SYSTEM_ID_4
+
+- export SYSTEM_ID_5=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node4 | jq -r '.system_id') && echo $SYSTEM_ID_5
 
 # Wait for VMs to be ready
 - |
-  echo "Waiting for VMs to enter 'Ready' state..."
+  echo "\n\n-------- Waiting for VMs to enter 'Ready' state... --------\n"
   
-  # Aggregate the IDs from your previous exports
-  IDS="$SYSTEM_ID_1 $SYSTEM_ID_2 $SYSTEM_ID_3"
+  IDS=$(maas $ADMIN_USER machines read | jq -r --arg host_id "$VM_HOST_ID" '.[] | select(.pod.id == ($host_id | tonumber)) | .system_id')
   
   # Safety check: Ensure we actually have IDs to check
-  if [ -z "$(echo "$IDS" | tr -d ' ')" ]; then
-    echo "Error: No System IDs found. Exports may not have persisted."
+  if [ -z "$IDS" ]; then
+    echo "Error: No VMs found belonging to Host ID '$VM_HOST_ID'."
     exit 1
   fi
 
@@ -262,9 +274,9 @@ runcmd:
     all_ready=true
     
     for id in $IDS; do
-      # Query MAAS for the status name (requires jq)
+      # Query MAAS for the status name
       status=$(maas $ADMIN_USER machine read "$id" | jq -r '.status_name')
-      echo "  Machine $id is currently '$status'..."
+      echo "  Machine '$id' is currently '$status'..."
       # If any machine is NOT ready, we mark the flag as false
       if [ "$status" != "Ready" ]; then
          all_ready=false
@@ -277,491 +289,67 @@ runcmd:
       break
     fi
 
-    # Wait 30 seconds before checking again
+    # Wait 60 seconds before checking again
     echo "Waiting 60s before checking again..."
     sleep 60
   done
 
-# Deploy VMs using VM host
-- echo -e "\n-------- Deploying VM(s)... --------\n"
+# Create tags and add them to commissioned machines
+- echo "\n\n-------- Creating and adding Tags... --------\n"
 
-- maas $ADMIN_USER machine deploy $SYSTEM_ID_1 distro_series=ubuntu/jammy ephemeral_deploy=false user_data=$(base64 -w 0 /root/node-deploy-config.yaml)
-- sleep 60
-- maas $ADMIN_USER machine deploy $SYSTEM_ID_2 distro_series=ubuntu/jammy ephemeral_deploy=false user_data=$(base64 -w 0 /root/node-deploy-config.yaml)
-- sleep 60
-- maas $ADMIN_USER machine deploy $SYSTEM_ID_3 distro_series=ubuntu/jammy ephemeral_deploy=false user_data=$(base64 -w 0 /root/node-deploy-config.yaml)
+- maas $ADMIN_USER tags create name=juju
+- maas $ADMIN_USER tag update-nodes juju add=$SYSTEM_ID_1
 
-# Clone Kubernetes the hard way git repo
-- echo -e "\n-------- Cloning k8s the hard way repo... --------\n"
-
-- export ARCH=$(dpkg --print-architecture)
-- export BASE_DIR="/root/kubernetes-the-hard-way"
-- export DOWN_DIR="${BASE_DIR}/downloads"
-
-- git clone --depth 1 https://github.com/kelseyhightower/kubernetes-the-hard-way.git ${BASE_DIR}
-
-# Download files
-- echo -e "\n-------- Downloading files... --------\n"
-
-- wget -q --https-only --timestamping -P ${DOWN_DIR} -i ${DOWN_DIR}-${ARCH}.txt && ls -oh ${DOWN_DIR}
-
-# Organize and extract files
-- echo -e "\n-------- Extracting and organizing files... --------\n"
-
-# Create directory structure
-- mkdir -p ${DOWN_DIR}/client
-- mkdir -p ${DOWN_DIR}/cni-plugins
-- mkdir -p ${DOWN_DIR}/controller
-- mkdir -p ${DOWN_DIR}/worker
-
-# Extract files
-- tar -xvf ${DOWN_DIR}/crictl-v1.32.0-linux-${ARCH}.tar.gz -C ${DOWN_DIR}/worker/
-- tar -xvf ${DOWN_DIR}/containerd-2.1.0-beta.0-linux-${ARCH}.tar.gz --strip-components 1 -C ${DOWN_DIR}/worker/
-- tar -xvf ${DOWN_DIR}/cni-plugins-linux-${ARCH}-v1.6.2.tgz -C ${DOWN_DIR}/cni-plugins/
-
-# Extract etcd specific binaries
-- tar -xvf ${DOWN_DIR}/etcd-v3.6.0-rc.3-linux-${ARCH}.tar.gz -C ${DOWN_DIR}/ --strip-components 1 etcd-v3.6.0-rc.3-linux-${ARCH}/etcdctl etcd-v3.6.0-rc.3-linux-${ARCH}/etcd
-
-# Move binaries to respective folders
-- mv ${DOWN_DIR}/etcdctl ${DOWN_DIR}/client/
-- mv ${DOWN_DIR}/kubectl ${DOWN_DIR}/client/
-- mv ${DOWN_DIR}/etcd ${DOWN_DIR}/controller/
-- mv ${DOWN_DIR}/kube-apiserver ${DOWN_DIR}/controller/
-- mv ${DOWN_DIR}/kube-controller-manager ${DOWN_DIR}/controller/
-- mv ${DOWN_DIR}/kube-scheduler ${DOWN_DIR}/controller/
-- mv ${DOWN_DIR}/kubelet ${DOWN_DIR}/worker/
-- mv ${DOWN_DIR}/kube-proxy ${DOWN_DIR}/worker/
-- mv ${DOWN_DIR}/runc.${ARCH} ${DOWN_DIR}/worker/runc
-
-# Cleanup tarballs
-- rm -rf ${DOWN_DIR}/*gz && ls -oh ${DOWN_DIR}
-
-# Set as executable
-- chmod +x ${DOWN_DIR}/client/*
-- chmod +x ${DOWN_DIR}/cni-plugins/*
-- chmod +x ${DOWN_DIR}/controller/*
-- chmod +x ${DOWN_DIR}/worker/*
-
-# Install kubectl
-- echo -e "\n-------- Installing Kubectl... --------\n"
-
-- cp ${DOWN_DIR}/client/kubectl /usr/local/bin/ && kubectl version --client
-
-# Write machine database
-- echo -e "\n-------- Writing machine database... --------\n"
+# Create MAAS Juju Cloud configuration files
+- echo "\n\n-------- Creating MAAS Juju Cloud Configs... --------\n"
 
 - |
-  cat <<EOF > /root/machines.txt
-  10.10.20.2 server.${MAAS_DOMAIN_NAME} server
-  10.10.20.3 node-0.${MAAS_DOMAIN_NAME} node-0 10.200.0.0/24
-  10.10.20.4 node-1.${MAAS_DOMAIN_NAME} node-1 10.200.1.0/24
+  cat <<EOF > /home/ubuntu/maas-cloud.yaml
+  clouds:
+    maas:
+      type: maas
+      auth-types: [oauth1]
+      endpoint: http://${IP_ADDRESS}:5240/MAAS
   EOF
 
-- cat /root/machines.txt
-- cp /root/machines.txt /home/ubuntu
-
-# Generate client and server certificates
-- echo -e "\n-------- Generating client and server certificates... --------\n"
-
-# Replace the .kubernetes.local domains with the .kubernetes domain
-- sed -i "/\[kube-api-server_alt_names\]/,/\[.*\]/ s/\.kubernetes\.local/.kubernetes/g" "${BASE_DIR}/ca.conf"
-
-# Replace MAAS Host IP 
-- sed -i "/\[kube-api-server_alt_names\]/,/\[.*\]/ s/IP\.1\s*=.*/IP.1  = $IP_ADDRESS/" "${BASE_DIR}/ca.conf"
-
 - |
-  openssl genrsa -out ${BASE_DIR}/ca.key 4096
-  openssl req -x509 -new -sha512 -noenc -key ${BASE_DIR}/ca.key -days 3653 -config ${BASE_DIR}/ca.conf -out ${BASE_DIR}/ca.crt
-
-  certs="admin node-0 node-1 kube-proxy kube-scheduler kube-controller-manager kube-api-server service-accounts"
-
-  for i in $certs; do
-    openssl genrsa -out "${BASE_DIR}/${i}.key" 4096
-    openssl req -new -key "${BASE_DIR}/${i}.key" -sha256 -config "${BASE_DIR}/ca.conf" -section ${i} -out "${BASE_DIR}/${i}.csr"
-    openssl x509 -req -days 3653 -in "${BASE_DIR}/${i}.csr" -copy_extensions copyall -sha256 -CA "${BASE_DIR}/ca.crt" -CAkey "${BASE_DIR}/ca.key" -CAcreateserial -out "${BASE_DIR}/${i}.crt"
-  done
-
-  ls -1 ${BASE_DIR}/*.crt ${BASE_DIR}/*.key ${BASE_DIR}/*.csr
-
-- cp ${BASE_DIR}/ca.crt /home/ubuntu/
-
-# Wait for VMs to be deployed
-- echo -e "\n-------- Wait for VMs to be deployed... --------\n"
-
-- |
-  echo "Waiting for VMs to enter 'Deployed' state..."
-  
-  # Aggregate the IDs from your previous exports
-  IDS="$SYSTEM_ID_1 $SYSTEM_ID_2 $SYSTEM_ID_3"
-  
-  # Safety check: Ensure we actually have IDs to check
-  if [ -z "$(echo "$IDS" | tr -d ' ')" ]; then
-    echo "Error: No System IDs found. Exports may not have persisted."
-    exit 1
-  fi
-
-  # Start the loop
-  while true; do
-    all_ready=true
-    
-    for id in $IDS; do
-      # Query MAAS for the status name (requires jq)
-      status=$(maas $ADMIN_USER machine read "$id" | jq -r '.status_name')
-      echo "  Machine $id is currently '$status'..."
-      # If any machine is NOT ready, we mark the flag as false
-      if [ "$status" != "Deployed" ]; then
-         all_ready=false
-      fi
-    done
-
-    # If the flag is still true, everyone is ready -> break the loop
-    if [ "$all_ready" = true ]; then
-      echo "All VMs are Ready!"
-      break
-    fi
-
-    # Wait 30 seconds before checking again
-    echo "Waiting 60s before checking again..."
-    sleep 60
-  done
-
-- sleep 60
-
-# Distribute client and server certificates
-- echo -e "\n-------- Distributing client and server certificates... --------\n"
-
-- ssh-keyscan node-0 node-1 server >> /root/.ssh/known_hosts
-
-- |
-  for host in node-0 node-1; do
-    ssh -i /root/.ssh/id_rsa root@${host} mkdir /var/lib/kubelet/
-
-    scp -i /root/.ssh/id_rsa ${BASE_DIR}/ca.crt root@${host}:/var/lib/kubelet/
-
-    scp -i /root/.ssh/id_rsa ${BASE_DIR}/${host}.crt root@${host}:/var/lib/kubelet/kubelet.crt
-
-    scp -i /root/.ssh/id_rsa ${BASE_DIR}/${host}.key root@${host}:/var/lib/kubelet/kubelet.key
-  done
-
-# Configure the etcd Server
-- ssh -i /root/.ssh/id_rsa root@server "mkdir -p /etc/etcd /var/lib/etcd && chmod 700 /var/lib/etcd"
-
-- scp -i /root/.ssh/id_rsa ${BASE_DIR}/ca.crt ${BASE_DIR}/kube-api-server.key ${BASE_DIR}/kube-api-server.crt root@server:/etc/etcd/
-
-# Configure the Kubernetes API Server
-- ssh -i /root/.ssh/id_rsa root@server "mkdir -p /var/lib/kubernetes/"
-
-- scp -i /root/.ssh/id_rsa ${BASE_DIR}/ca.crt ${BASE_DIR}/ca.key ${BASE_DIR}/kube-api-server.key ${BASE_DIR}/kube-api-server.crt ${BASE_DIR}/service-accounts.key ${BASE_DIR}/service-accounts.crt root@server:/var/lib/kubernetes/
-
-# Generate client authentication configuration files
-- echo -e "\n-------- Generate client authentication configuration files... --------\n"
-
-- |
-  # Generate a kubeconfig file for the node-0 and node-1 worker nodes
-
-  for host in node-0 node-1; do
-    kubectl config set-cluster kubernetes-the-hard-way \
-      --certificate-authority=${BASE_DIR}/ca.crt \
-      --embed-certs=true \
-      --server=https://server.kubernetes:6443 \
-      --kubeconfig=${BASE_DIR}/${host}.kubeconfig
-
-    kubectl config set-credentials system:node:${host} \
-      --client-certificate=${BASE_DIR}/${host}.crt \
-      --client-key=${BASE_DIR}/${host}.key \
-      --embed-certs=true \
-      --kubeconfig=${BASE_DIR}/${host}.kubeconfig
-
-    kubectl config set-context default \
-      --cluster=kubernetes-the-hard-way \
-      --user=system:node:${host} \
-      --kubeconfig=${BASE_DIR}/${host}.kubeconfig
-
-    kubectl config use-context default \
-      --kubeconfig=${BASE_DIR}/${host}.kubeconfig
-  done
-
-  # Generate a kubeconfig file for the kube-proxy service
-
-  kubectl config set-cluster kubernetes-the-hard-way \
-    --certificate-authority=${BASE_DIR}/ca.crt \
-    --embed-certs=true \
-    --server=https://server.kubernetes:6443 \
-    --kubeconfig=${BASE_DIR}/kube-proxy.kubeconfig
+  cat <<EOF > /home/ubuntu/maas-creds.yaml
+  credentials:
+    maas:
+      anyuser:
+        auth-type: oauth1
+        maas-oauth: $APIKEY
+  EOF
 
-  kubectl config set-credentials system:kube-proxy \
-    --client-certificate=${BASE_DIR}/kube-proxy.crt \
-    --client-key=${BASE_DIR}/kube-proxy.key \
-    --embed-certs=true \
-    --kubeconfig=${BASE_DIR}/kube-proxy.kubeconfig
+- chown ubuntu:ubuntu /home/ubuntu/maas-*.yaml
 
-  kubectl config set-context default \
-    --cluster=kubernetes-the-hard-way \
-    --user=system:kube-proxy \
-    --kubeconfig=${BASE_DIR}/kube-proxy.kubeconfig
+# Add MAAS as a Juju Cloud
+- echo "\n\n-------- Adding MAAS as a Juju Cloud... --------\n"
 
-  kubectl config use-context default \
-    --kubeconfig=${BASE_DIR}/kube-proxy.kubeconfig
+- su ubuntu -c 'juju add-cloud --client -f ~/maas-cloud.yaml maas'
 
-  # Generate a kubeconfig file for the kube-controller-manager service
+# Add MAAS as a Juju Cloud
+- echo "\n\n-------- Adding MAAS Credentials to Juju... --------\n"
 
-  kubectl config set-cluster kubernetes-the-hard-way \
-    --certificate-authority=${BASE_DIR}/ca.crt \
-    --embed-certs=true \
-    --server=https://server.kubernetes:6443 \
-    --kubeconfig=${BASE_DIR}/kube-controller-manager.kubeconfig
+- su ubuntu -c 'juju add-credential --client -f ~/maas-creds.yaml maas'
 
-  kubectl config set-credentials system:kube-controller-manager \
-    --client-certificate=${BASE_DIR}/kube-controller-manager.crt \
-    --client-key=${BASE_DIR}/kube-controller-manager.key \
-    --embed-certs=true \
-    --kubeconfig=${BASE_DIR}/kube-controller-manager.kubeconfig
+# Remove config files
+- rm /home/ubuntu/maas-*.yaml
 
-  kubectl config set-context default \
-    --cluster=kubernetes-the-hard-way \
-    --user=system:kube-controller-manager \
-    --kubeconfig=${BASE_DIR}/kube-controller-manager.kubeconfig
+# Bootstrap Juju controller
+- echo "\n\n-------- Bootstrapping Juju Controller... --------\n"
 
-  kubectl config use-context default \
-    --kubeconfig=${BASE_DIR}/kube-controller-manager.kubeconfig
+- su ubuntu -c 'juju bootstrap --bootstrap-base=ubuntu@22.04 --constraints tags=juju maas juju-controller'
 
-  # Generate a kubeconfig file for the kube-scheduler service
 
-  kubectl config set-cluster kubernetes-the-hard-way \
-    --certificate-authority=${BASE_DIR}/ca.crt \
-    --embed-certs=true \
-    --server=https://server.kubernetes:6443 \
-    --kubeconfig=${BASE_DIR}/kube-scheduler.kubeconfig
+# ---------------------------------------------- DEPLOY CHARMED KUBERNETES ----------------------------------------------
 
-  kubectl config set-credentials system:kube-scheduler \
-    --client-certificate=${BASE_DIR}/kube-scheduler.crt \
-    --client-key=${BASE_DIR}/kube-scheduler.key \
-    --embed-certs=true \
-    --kubeconfig=${BASE_DIR}/kube-scheduler.kubeconfig
 
-  kubectl config set-context default \
-    --cluster=kubernetes-the-hard-way \
-    --user=system:kube-scheduler \
-    --kubeconfig=${BASE_DIR}/kube-scheduler.kubeconfig
+# Create Juju Model
+- echo "\n\n-------- Creating Juju Kubernetes Model... --------\n"
 
-  kubectl config use-context default \
-    --kubeconfig=${BASE_DIR}/kube-scheduler.kubeconfig
+- su ubuntu -c 'juju add-model --config default-base=ubuntu@22.04 kubernetes'
 
-  # Generate a kubeconfig file for the admin user:
+- echo "\n\n-------- Finished deploying charmed Kubernetes, have fun! --------\n"
 
-  kubectl config set-cluster kubernetes-the-hard-way \
-    --certificate-authority=${BASE_DIR}/ca.crt \
-    --embed-certs=true \
-    --server=https://127.0.0.1:6443 \
-    --kubeconfig=${BASE_DIR}/admin.kubeconfig
 
-  kubectl config set-credentials admin \
-    --client-certificate=${BASE_DIR}/admin.crt \
-    --client-key=${BASE_DIR}/admin.key \
-    --embed-certs=true \
-    --kubeconfig=${BASE_DIR}/admin.kubeconfig
-
-  kubectl config set-context default \
-    --cluster=kubernetes-the-hard-way \
-    --user=admin \
-    --kubeconfig=${BASE_DIR}/admin.kubeconfig
-
-  kubectl config use-context default \
-    --kubeconfig=${BASE_DIR}/admin.kubeconfig
-
-# Distribute client authentication configuration files
-- echo -e "\n-------- Distribute client authentication configuration files... --------\n"
-
-- |
-  for host in node-0 node-1; do
-    ssh -i /root/.ssh/id_rsa root@${host} "mkdir -p /var/lib/{kube-proxy,kubelet}"
-
-    scp -i /root/.ssh/id_rsa ${BASE_DIR}/kube-proxy.kubeconfig root@${host}:/var/lib/kube-proxy/kubeconfig
-
-    scp -i /root/.ssh/id_rsa ${BASE_DIR}/${host}.kubeconfig root@${host}:/var/lib/kubelet/kubeconfig
-  done
-
-- scp -i /root/.ssh/id_rsa ${BASE_DIR}/kube-controller-manager.kubeconfig ${BASE_DIR}/kube-scheduler.kubeconfig root@server:/var/lib/kubernetes/
-
-- scp -i /root/.ssh/id_rsa ${BASE_DIR}/admin.kubeconfig root@server:~/
-
-# Generate the data encryption config and key
-- echo -e "\n-------- Generate the data encryption config and key... --------\n"
-
-- export ENCRYPTION_KEY=$(head -c 32 /dev/urandom | base64)
-
-- envsubst < ${BASE_DIR}/configs/encryption-config.yaml > ${BASE_DIR}/encryption-config.yaml
-
-- scp -i /root/.ssh/id_rsa ${BASE_DIR}/encryption-config.yaml root@server:/var/lib/kubernetes/
-
-# Copy etcd binaries and systemd unit files to the server machine
-- echo -e "\n-------- Copying etcd binaries and systemd unit files to the server machine... --------\n"
-
-# Install the etcd server and the etcdctl command line utility
-- scp -i /root/.ssh/id_rsa ${DOWN_DIR}/controller/etcd ${DOWN_DIR}/client/etcdctl root@server:/usr/local/bin/
-
-# Create the etcd.service systemd unit file
-- scp -i /root/.ssh/id_rsa ${BASE_DIR}/units/etcd.service root@server:/etc/systemd/system/
-
-# Start etcd server
-- echo -e "\n-------- Starting etcd server.. --------\n"
-
-- ssh -i /root/.ssh/id_rsa root@server "systemctl daemon-reload && systemctl enable etcd && systemctl start etcd && etcdctl member list"
-
-# Copy Kubernetes binaries and systemd unit files to the server machine
-- echo -e "\n-------- Copying Kubernetes binaries and systemd unit files to the server machine... --------\n"
-
-- ssh -i /root/.ssh/id_rsa root@server "mkdir -p /etc/kubernetes/config"
-
-# Install the Kubernetes binaries
-- scp -i /root/.ssh/id_rsa ${DOWN_DIR}/controller/kube-apiserver ${DOWN_DIR}/controller/kube-controller-manager ${DOWN_DIR}/controller/kube-scheduler ${DOWN_DIR}/client/kubectl root@server:/usr/local/bin/
-
-# Create the kube-apiserver.service, kube-controller-manager.service and kube-scheduler.service systemd unit files
-- scp -i /root/.ssh/id_rsa ${BASE_DIR}/units/kube-apiserver.service ${BASE_DIR}/units/kube-controller-manager.service ${BASE_DIR}/units/kube-scheduler.service root@server:/etc/systemd/system/
-
-- scp -i /root/.ssh/id_rsa ${BASE_DIR}/configs/kube-scheduler.yaml root@server:/etc/kubernetes/config/
-
-# Start controller services
-- echo -e "\n-------- Start controller services.. --------\n"
-
-- ssh -i /root/.ssh/id_rsa root@server "systemctl daemon-reload && systemctl enable kube-apiserver kube-controller-manager kube-scheduler && systemctl start kube-apiserver kube-controller-manager kube-scheduler"
-
-- sleep 30
-
-# Check if the kube-apiserver is fully initialized, and active
-- ssh -i /root/.ssh/id_rsa root@server "systemctl is-active kube-apiserver && kubectl cluster-info --kubeconfig /root/admin.kubeconfig"
-
-- scp -i /root/.ssh/id_rsa ${BASE_DIR}/configs/kube-apiserver-to-kubelet.yaml root@server:~/
-
-- ssh -i /root/.ssh/id_rsa root@server "kubectl apply -f /root/kube-apiserver-to-kubelet.yaml --kubeconfig /root/admin.kubeconfig"
-
-# Verify Kubernetes control plane
-- echo -e "\n-------- Verify Kubernetes control plane.. --------\n"
-
-- curl --cacert ${BASE_DIR}/ca.crt https://server.kubernetes:6443/version
-
-# Install the OS dependencies
-- echo -e "\n-------- Installing dependencies in each worker instance... --------\n"
-
-- |
-  for HOST in node-0 node-1; do
-    ssh -i /root/.ssh/id_rsa root@${HOST} "apt-get update && apt-get -y install socat conntrack ipset kmod"
-    ssh -i /root/.ssh/id_rsa root@${HOST} "swapoff -a"
-    ssh -i /root/.ssh/id_rsa root@${HOST} "mkdir -p /etc/cni/net.d /opt/cni/bin /var/lib/kubelet /var/lib/kube-proxy /var/lib/kubernetes /var/run/kubernetes /etc/containerd/"
-  done
-
-# Copy Kubernetes binaries and systemd unit files to each worker instance
-- echo -e "\n-------- Copying Kubernetes binaries and systemd unit files to each worker instance... --------\n"
-
-- |
-  for HOST in node-0 node-1; do
-    SUBNET=$(grep ${HOST} /root/machines.txt | cut -d " " -f 4)
-    sed "s|SUBNET|$SUBNET|g" ${BASE_DIR}/configs/10-bridge.conf > ${BASE_DIR}/10-bridge.conf
-
-    sed "s|SUBNET|$SUBNET|g" ${BASE_DIR}/configs/kubelet-config.yaml > ${BASE_DIR}/kubelet-config.yaml
-
-    scp -i /root/.ssh/id_rsa ${BASE_DIR}/10-bridge.conf ${BASE_DIR}/configs/99-loopback.conf root@${HOST}:/etc/cni/net.d/
-
-    scp -i /root/.ssh/id_rsa ${BASE_DIR}/kubelet-config.yaml root@${HOST}:/var/lib/kubelet/
-  done
-
-  for HOST in node-0 node-1; do
-    scp -i /root/.ssh/id_rsa ${DOWN_DIR}/worker/crictl ${DOWN_DIR}/worker/kube-proxy ${DOWN_DIR}/worker/kubelet ${DOWN_DIR}/worker/runc root@${HOST}:/usr/local/bin/
-    scp -i /root/.ssh/id_rsa ${DOWN_DIR}/worker/containerd ${DOWN_DIR}/worker/containerd-shim-runc-v2 ${DOWN_DIR}/worker/containerd-stress root@${HOST}:/bin/
-    
-    scp -i /root/.ssh/id_rsa ${BASE_DIR}/configs/containerd-config.toml root@${HOST}:/etc/containerd/
-    scp -i /root/.ssh/id_rsa ${BASE_DIR}/configs/kube-proxy-config.yaml root@${HOST}:/var/lib/kube-proxy/
-
-    scp -i /root/.ssh/id_rsa ${BASE_DIR}/units/containerd.service ${BASE_DIR}/units/kubelet.service ${BASE_DIR}/units/kube-proxy.service root@${HOST}:/etc/systemd/system/
-  done
-
-# Configure CNI Networking in each worker instance
-- echo -e "\n-------- Configure CNI Networking in each worker instance... --------\n"
-
-- |
-  for HOST in node-0 node-1; do
-    scp -i /root/.ssh/id_rsa ${DOWN_DIR}/cni-plugins/* root@${HOST}:/opt/cni/bin
-    ssh -i /root/.ssh/id_rsa root@${HOST} "modprobe br-netfilter && echo "br-netfilter" >> /etc/modules-load.d/modules.conf"
-    ssh -i /root/.ssh/id_rsa root@${HOST} "echo "net.bridge.bridge-nf-call-iptables = 1" >> /etc/sysctl.d/kubernetes.conf"
-    ssh -i /root/.ssh/id_rsa root@${HOST} "echo "net.bridge.bridge-nf-call-ip6tables = 1" >> /etc/sysctl.d/kubernetes.conf"
-    ssh -i /root/.ssh/id_rsa root@${HOST} "sysctl -p /etc/sysctl.d/kubernetes.conf"
-  done
-
-# Start worker services in each worker instance
-- echo -e "\n-------- Start worker services in each worker instance... --------\n"
-
-- |
-  for HOST in node-0 node-1; do
-    ssh -i /root/.ssh/id_rsa root@${HOST} "systemctl daemon-reload && systemctl enable containerd kubelet kube-proxy && systemctl start containerd kubelet kube-proxy"
-  done
-
-- sleep 30
-
-# Verify if the Kubelet service is running in each worker instance
-- |
-  for HOST in node-0 node-1; do
-    echo -e "\n-------- Verify if the Kubelet service is running in '${HOST}'.. --------\n"
-    ssh -i /root/.ssh/id_rsa root@${HOST} "systemctl is-active kubelet"
-  done
-
-# Verify registered Kubernetes nodes
-- echo -e "\n-------- Verify registered Kubernetes nodes.. --------\n"
-
-- ssh root@server "kubectl get nodes --kubeconfig ~/admin.kubeconfig"
-
-# Configure kubectl for remote access
-- echo -e "\n-------- Configuring kubectl for remote access... --------\n"
-
-- |
-  kubectl config set-cluster kubernetes-the-hard-way \
-    --certificate-authority=${BASE_DIR}/ca.crt \
-    --embed-certs=true \
-    --server=https://server.kubernetes:6443 \
-    --kubeconfig=/root/.kube/config
-
-  kubectl config set-credentials admin \
-    --client-certificate=${BASE_DIR}/admin.crt \
-    --client-key=${BASE_DIR}/admin.key \
-    --embed-certs=true \
-    --kubeconfig=/root/.kube/config
-
-  kubectl config set-context kubernetes-the-hard-way \
-    --cluster=kubernetes-the-hard-way \
-    --user=admin \
-    --kubeconfig=/root/.kube/config
-
-  kubectl config use-context kubernetes-the-hard-way \
-    --kubeconfig=/root/.kube/config
-
-- cp -r /root/.kube /home/ubuntu/
-- chown -R ubuntu:ubuntu /home/ubuntu/.kube
-
-# Verify Kubernetes cluster
-- echo -e "\n-------- Verify Kubernetes cluster... --------\n"
-
-- su -l root -c "kubectl version && kubectl get nodes"
-
-# Create routing table
-- echo -e "\n-------- Create routing table... --------\n"
-
-- export SERVER_IP=$(grep server /root/machines.txt | cut -d " " -f 1)
-- export NODE_0_IP=$(grep node-0 /root/machines.txt | cut -d " " -f 1)
-- export NODE_0_SUBNET=$(grep node-0 /root/machines.txt | cut -d " " -f 4)
-- export NODE_1_IP=$(grep node-1 /root/machines.txt | cut -d " " -f 1)
-- export NODE_1_SUBNET=$(grep node-1 /root/machines.txt | cut -d " " -f 4)
-
-- ssh -i /root/.ssh/id_rsa root@server "ip route add ${NODE_0_SUBNET} via ${NODE_0_IP}"
-- ssh -i /root/.ssh/id_rsa root@server "ip route add ${NODE_1_SUBNET} via ${NODE_1_IP}"
-
-- ssh -i /root/.ssh/id_rsa root@node-0 "ip route add ${NODE_1_SUBNET} via ${NODE_1_IP}"
-- ssh -i /root/.ssh/id_rsa root@node-1 "ip route add ${NODE_0_SUBNET} via ${NODE_0_IP}"
-
-# Verify routing table
-- echo -e "\n-------- Verify routing table... --------\n"
-
-- ssh root@server ip route
-- ssh root@node-0 ip route
-- ssh root@node-1 ip route
-
-# Kubernetes the hard way finished deploying
-- echo -e "\n-------- Kubernetes the hard way finished deploying! --------\n"

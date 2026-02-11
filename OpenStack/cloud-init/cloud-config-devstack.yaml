@@ -1,5 +1,6 @@
 #cloud-config
 ssh_import_id: ['lp:pgdg99']
+ssh_authorized_keys: [ssh-ed25519 AAAAC3...]
 ssh_genkeytypes: [ed25519]
 
 write_files:
@@ -39,7 +40,7 @@ users:
 runcmd:
 
 # Export variables
-- echo -e "\n-------- Exporting variables... --------\n"
+- echo "\n\n-------- Exporting variables... --------\n"
 
 - export ADMIN_PASSWORD=admin
 - export DATABASE_PASSWORD=$ADMIN_PASSWORD
@@ -49,7 +50,7 @@ runcmd:
 - chmod +x /opt/stack
 
 # Clone devstack repo
-- echo -e "\n-------- Cloning DevStack Repository... --------\n"
+- echo "\n\n-------- Cloning DevStack Repository... --------\n"
 
 - su stack -c 'git clone https://opendev.org/openstack/devstack /opt/stack/devstack'
 
@@ -65,10 +66,10 @@ runcmd:
 - chown stack:stack /opt/stack/devstack/local.conf
 
 # Install devstack
-- echo -e "\n-------- Installing DevStack... --------\n"
+- echo "\n\n-------- Installing DevStack... --------\n"
 
 - su -l stack -c '~/devstack/stack.sh'
 
-- echo -e "\n-------- DevStack finished deploying, have fun!... --------\n"
+- echo "\n\n-------- Finished deploying DevStack, have fun!... --------\n"
 
 

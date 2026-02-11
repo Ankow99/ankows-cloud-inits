@@ -1,5 +1,6 @@
 #cloud-config
 ssh_import_id: ['lp:pgdg99']
+ssh_authorized_keys: [ssh-ed25519 AAAAC3...]
 ssh_genkeytypes: [ed25519]
 
 write_files:
@@ -44,33 +45,33 @@ random_seed:
 runcmd:
 
 # Export variables
-- echo -e "\n-------- Exporting variables... --------\n"
+- echo "\n\n-------- Exporting variables... --------\n"
 
 - export ACCOUNT_NAME=standalone
 - export COMPUTER_TITLE=client
 
 - export LANDSCAPE_SERVER_FQDN=server.landscape.com
-- export LANDSCAPE_SERVER_IP=
+- export LANDSCAPE_SERVER_IP=<ip> # Set this up before launching
 
-- export IP_ADDRESS=$(ip -j route show default | jq -r '.[].prefsrc')
+- export IP_ADDRESS=$(hostname -I | awk '{print $1}')
 - export FQDN=$(hostname -f)
 - export DEBIAN_FRONTEND=noninteractive
 
 # Add landscape server FQDN to /etc/hosts
-- echo -e "\n-------- Adding Landscape Server FQDN to /etc/hosts... --------\n"
+- echo "\n\n-------- Adding Landscape Server FQDN to /etc/hosts... --------\n"
 
-- echo "$LANDSCAPE_IP $LANDSCAPE_FQDN" >> /etc/hosts
+- echo "$LANDSCAPE_SERVER_IP $LANDSCAPE_SERVER_FQDN" >> /etc/hosts
 
 # Obtain landscape server self-signed certificate
-- echo -e "\n-------- Obtain Landscape Server Self-Signed CA... --------\n"
+- echo "\n\n-------- Obtain Landscape Server Self-Signed CA... --------\n"
 
-- echo -n | openssl s_client -connect $LANDSCAPE_SERVER_IP:443 | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' | tee /etc/landscape/server.pem
+- echo -n | openssl s_client -connect $LANDSCAPE_SERVER_FQDN:443 | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' | tee /etc/landscape/server.pem
 
 # Attach Ubuntu Pro Token
-- pro attach C12NUyK6MQUgNMLZjR4CDW5KX334gx
+- pro attach <pro-token> # Your own Ubuntu Pro Token
 
 # Configure Landscape client
-- echo -e "\n-------- Configure Landscape Client... --------\n"
+- echo "\n\n-------- Configure Landscape Client... --------\n"
 
 - landscape-config --silent --account-name="${ACCOUNT_NAME}" --computer-title="${COMPUTER_TITLE}" --tags='' --script-users='nobody,landscape,root' --ping-url="http://${LANDSCAPE_SERVER_FQDN}/ping" --url="https://${LANDSCAPE_SERVER_FQDN}/message-system" --ssl-public-key /etc/landscape/server.pem
 

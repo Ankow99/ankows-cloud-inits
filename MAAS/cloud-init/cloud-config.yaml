@@ -1,5 +1,6 @@
 #cloud-config
 ssh_import_id: ['lp:pgdg99']
+ssh_authorized_keys: [ssh-ed25519 AAAAC3...]
 ssh_genkeytypes: [ed25519]
 
 write_files:
@@ -86,7 +87,7 @@ random_seed:
 runcmd:
 
 # Export variables
-- echo -e "\n-------- Exporting variables... --------\n"
+- echo "\n\n-------- Exporting variables... --------\n"
 
 - export SSH_KEY=lp:pgdg99
 
@@ -106,11 +107,11 @@ runcmd:
 - export NODE_RAM=4096
 - export NODE_MAIN_DISK=20
 
-- export IP_ADDRESS=$(ip -j route show default | jq -r '.[].prefsrc')
+- export IP_ADDRESS=$(hostname -I | awk '{print $1}')
 - export INTERFACE=$(ip -j route show default | jq -r '.[].dev')
 
 # Make the bridge active on the first boot
-- echo -e "\n-------- Applying and attaching network bridge... --------\n"
+- echo "\n\n-------- Applying and attaching network bridge... --------\n"
 
 - netplan apply
 
@@ -118,7 +119,7 @@ runcmd:
 - lxc network attach-profile lxdbr0 default
 
 # Fetch IPv4 address from the device, setup forwarding and NAT
-- echo -e "\n-------- Configuring Port Forwarding and NAT... --------\n"
+- echo "\n\n-------- Configuring Port Forwarding and NAT... --------\n"
 
 - sysctl -p /etc/sysctl.d/99-maas-nat.conf
 - iptables -t nat -A POSTROUTING -o $INTERFACE -j SNAT --to $IP_ADDRESS
@@ -127,20 +128,19 @@ runcmd:
 - netfilter-persistent save
 
 # Install MAAS now that LXD and networking are configured
-- echo -e "\n-------- Installing MAAS... --------\n"
+- echo "\n\n-------- Installing MAAS... --------\n"
 
 - apt-get update
-- apt-get remove -y systemd-timesyncd
 - apt-get install -y maas
 
 # Initialise MAAS
-- echo -e "\n-------- Initializing MAAS... --------\n"
+- echo "\n\n-------- Initializing MAAS... --------\n"
 
 - maas init --admin-username $ADMIN_USER --admin-password $ADMIN_PASS --admin-email $ADMIN_EMAIL --admin-ssh-import $SSH_KEY --rbac-url "" --candid-agent-file ""
 
 # Wait for MAAS services to be ready
 - |
-  echo -e "\n-------- Waiting for MAAS API to be ready... --------\n"
+  echo "\n\n-------- Waiting for MAAS API to be ready... --------\n"
   
   until maas login $ADMIN_USER 'http://localhost:5240/MAAS/' $(maas apikey --username $ADMIN_USER) > /dev/null 2>&1; do
     echo "MAAS is not ready yet (502). Retrying in 30 seconds..."
@@ -148,7 +148,7 @@ runcmd:
   done
 
 # Grab API key and login as admin
-- echo -e "\n-------- Logging in as admin user... --------\n"
+- echo "\n\n-------- Logging in as admin user... --------\n"
 
 - export APIKEY=$(maas apikey --username $ADMIN_USER)
 - maas login $ADMIN_USER 'http://localhost:5240/MAAS/' $APIKEY
@@ -156,7 +156,7 @@ runcmd:
 - maas $ADMIN_USER maas set-config name=maas_name value=$MAAS_PROJECT_NAME name=completed_intro value=true
 
 # Automatically create and add ssh keys to MAAS
-- echo -e "\n-------- Generating SSH keys and adding them to MAAS... --------\n"
+- echo "\n\n-------- Generating SSH keys and adding them to MAAS... --------\n"
 
 - ssh-keygen -q -t rsa -N "" -f "/home/ubuntu/.ssh/id_rsa"
 - chown ubuntu:ubuntu /home/ubuntu/.ssh/id_rsa /home/ubuntu/.ssh/id_rsa.pub
@@ -165,7 +165,7 @@ runcmd:
 - maas $ADMIN_USER sshkeys create key="$(cat /home/ubuntu/.ssh/id_rsa.pub)"
 
 # Configure MAAS networking (set gateways, vlans, DHCP on etc)
-- echo -e "\n-------- Configuring MAAS networking... --------\n"
+- echo "\n\n-------- Configuring MAAS networking... --------\n"
 
 - export FABRIC_ID=$(maas $ADMIN_USER subnet read "$SUBNET" | jq -r ".vlan.fabric_id")
 - export VLAN_TAG=$(maas $ADMIN_USER subnet read "$SUBNET" | jq -r ".vlan.vid")
@@ -177,7 +177,7 @@ runcmd:
 - maas $ADMIN_USER maas set-config name=upstream_dns value=$MAAS_DNS
 
 # Configure boot images
-- echo -e "\n-------- Configuring MAAS boot images... --------\n"
+- echo "\n\n-------- Configuring MAAS boot images... --------\n"
 
 - export BOOT_SOURCE_ID=$(maas $ADMIN_USER boot-sources read | jq -r '.[0].id')
 
@@ -187,10 +187,51 @@ runcmd:
 - maas $ADMIN_USER boot-resources import
 
 # Wait for MAAS boot images to be ready
-- sleep 90
+- |
+  echo "\n\n-------- Waiting for all MAAS Boot Images to sync... --------\n"
+  
+  while true; do
+    
+    missing_images=false
+
+    importing_status=$(maas $ADMIN_USER boot-resources is-importing)
+
+    # Get the list of images we requested (e.g., "focal jammy noble")
+    requested_releases=$(maas $ADMIN_USER boot-source-selections read $BOOT_SOURCE_ID | jq -r '.[].release')
+
+    # Get the list of images that are actually downloaded and ready
+    downloaded_releases=$(maas $ADMIN_USER boot-resources read | jq -r '.[].name' | sort | uniq)
+
+    # Check if the image has been downloaded
+    for release in $requested_releases; do
+      if echo "$downloaded_releases" | grep -q "$release"; then
+         # Image exists. Now check if import is finished
+         if [ "$importing_status" = "false" ]; then
+             echo "  Image '$release' has downloaded!"
+         else
+             echo "  Image '$release' is currently syncing..."
+             missing_images=true
+         fi
+      else
+         echo "  Image '$release' was not found in boot resources..."
+         missing_images=true
+      fi
+    done
+
+    # Check for missing images
+    if [ "$missing_images" = "false" ]; then
+      clean_list=$(echo "$requested_releases" | tr '\n' ' ')
+      echo "All selected boot images ( $clean_list) are fully synced!"
+      break
+    fi
+
+    # Wait 30 seconds before checking again
+    echo "Some images are missing. Waiting 30s..."
+    sleep 30
+  done
 
 # Install Packer
-#- echo -e "\n-------- Installing Packer... --------\n"
+#- echo "\n\n-------- Installing Packer... --------\n"
 
 #- wget -O - https://apt.releases.hashicorp.com/gpg | gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
 #- echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(grep -oP '(?<=UBUNTU_CODENAME=).*' /etc/os-release || lsb_release -cs) main" | tee /etc/apt/sources.list.d/hashicorp.list
@@ -199,7 +240,7 @@ runcmd:
 #- apt-get install -y packer make qemu-utils libnbd-bin nbdkit fuse2fs qemu-system qemu-system-modules-spice ovmf cloud-image-utils parted
 
 # Create custom Image using Packer
-#- echo -e "\n-------- Creating Custom MAAS Image using Packer... --------\n"
+#- echo "\n\n-------- Creating Custom MAAS Image using Packer... --------\n"
 
 #- git clone https://github.com/canonical/packer-maas.git /home/ubuntu/packer-maas/
 #- su -l ubuntu -c 'sudo make -C ~/packer-maas/ubuntu/ custom-cloudimg.tar.gz'
@@ -207,35 +248,34 @@ runcmd:
 #- chown ubuntu:ubuntu /home/ubuntu/custom-cloudimg.tar.gz
 
 # Add custom image to MAAS
-#- echo -e "\n-------- Adding Custom Image to MAAS... --------\n"
+#- echo "\n\n-------- Adding Custom Image to MAAS... --------\n"
 
 #- su ubuntu -c "maas login $ADMIN_USER 'http://localhost:5240/MAAS/' $APIKEY && maas $ADMIN_USER boot-resources create name='custom/ubuntu-tgz' title='Ubuntu Custom TGZ' architecture='amd64/generic' filetype='tgz' content@='/home/ubuntu/custom-cloudimg.tar.gz'"
 
 # Add LXD as a VM host for MAAS
-- echo -e "\n-------- Adding LXD as VM host in MAAS... --------\n"
+- echo "\n\n-------- Adding LXD as VM host in MAAS... --------\n"
 
 - maas $ADMIN_USER vm-hosts create type=lxd power_address=https://${IP_ADDRESS}:8444 password=password name=LXD project=$MAAS_PROJECT_NAME
 - export VM_HOST_ID=$(maas $ADMIN_USER vm-hosts read | jq -r '.[0].id')
 
 # Compose VMs using VM host (-c limits.cpu=6 -c limits.memory=12GiB --device root,size=60GiB)
-- echo -e "\n-------- Composing VM(s) using LXD... --------\n"
+- echo "\n\n-------- Composing VM(s) using LXD... --------\n"
 
-- export SYSTEM_ID_1=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node1 | jq -r '.system_id')
+- export SYSTEM_ID_1=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node1 | jq -r '.system_id') && echo $SYSTEM_ID_1
 
-- export SYSTEM_ID_2=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node2 | jq -r '.system_id')
+- export SYSTEM_ID_2=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node2 | jq -r '.system_id') && echo $SYSTEM_ID_2
 
-- export SYSTEM_ID_3=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node3 | jq -r '.system_id')
+- export SYSTEM_ID_3=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node3 | jq -r '.system_id') && echo $SYSTEM_ID_3
 
 # Wait for VMs to be ready
 - |
-  echo "Waiting for VMs to enter 'Ready' state..."
+  echo "\n\n-------- Waiting for VMs to enter 'Ready' state... --------\n"
   
-  # Aggregate the IDs from your previous exports
-  IDS="$SYSTEM_ID_1 $SYSTEM_ID_2 $SYSTEM_ID_3"
+  IDS=$(maas $ADMIN_USER machines read | jq -r --arg host_id "$VM_HOST_ID" '.[] | select(.pod.id == ($host_id | tonumber)) | .system_id')
   
   # Safety check: Ensure we actually have IDs to check
-  if [ -z "$(echo "$IDS" | tr -d ' ')" ]; then
-    echo "Error: No System IDs found. Exports may not have persisted."
+  if [ -z "$IDS" ]; then
+    echo "Error: No VMs found belonging to Host ID '$VM_HOST_ID'."
     exit 1
   fi
 
@@ -244,9 +284,9 @@ runcmd:
     all_ready=true
     
     for id in $IDS; do
-      # Query MAAS for the status name (requires jq)
+      # Query MAAS for the status name
       status=$(maas $ADMIN_USER machine read "$id" | jq -r '.status_name')
-      echo "  Machine $id is currently '$status'..."
+      echo "  Machine '$id' is currently '$status'..."
       # If any machine is NOT ready, we mark the flag as false
       if [ "$status" != "Ready" ]; then
          all_ready=false
@@ -259,13 +299,13 @@ runcmd:
       break
     fi
 
-    # Wait 30 seconds before checking again
+    # Wait 60 seconds before checking again
     echo "Waiting 60s before checking again..."
     sleep 60
   done
 
 # Deploy VMs using VM host
-#- echo -e "\n-------- Deploying VM(s)... --------\n"
+#- echo "\n\n-------- Deploying VM(s)... --------\n"
 
 #- maas $ADMIN_USER machine deploy $SYSTEM_ID_1 distro_series=ubuntu/noble ephemeral_deploy=false
 #- maas $ADMIN_USER machine deploy $SYSTEM_ID_2 distro_series=ubuntu/jammy ephemeral_deploy=false

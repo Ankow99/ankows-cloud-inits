@@ -1,5 +1,6 @@
 #cloud-config
 ssh_import_id: ['lp:pgdg99']
+ssh_authorized_keys: [ssh-ed25519 AAAAC3...]
 ssh_genkeytypes: [ed25519]
 
 write_files:
@@ -65,31 +66,31 @@ random_seed:
 runcmd:
 
 # Export variables
-- echo -e "\n-------- Exporting variables... --------\n"
+- echo "\n\n-------- Exporting variables... --------\n"
 
 - export USERNAME=landscape_superuser
 - export PASSWORD=admin
 
-- export IP_ADDRESS=$(ip -j route show default | jq -r '.[].prefsrc')
+- export IP_ADDRESS=$(hostname -I | awk '{print $1}')
 - export FQDN=$(hostname -f)
 - export SECRET_TOKEN=$(openssl rand -base64 128 | tr -d '\n')
 - export DEBIAN_FRONTEND=noninteractive
 
 # Create a superuser Landscape can use
-- echo -e "\n-------- Creating Landscape Superuser... --------\n"
+- echo "\n\n-------- Creating Landscape Superuser... --------\n"
 
 #- su postgres createuser --createdb --createrole --superuser --no-password landscape_superuser
 - sudo -u postgres psql -c "CREATE ROLE $USERNAME WITH SUPERUSER CREATEDB CREATEROLE LOGIN PASSWORD '$PASSWORD';"
 
 # Configure PostgreSQL
-- echo -e "\n-------- Configuring PostgreSQL... --------\n"
+- echo "\n\n-------- Configuring PostgreSQL... --------\n"
 
 - echo "host all landscape,landscape_maintenance,landscape_superuser ${IP_ADDRESS}/32 md5" >> /etc/postgresql/16/main/pg_hba.conf
 
 - systemctl restart postgresql
 
 # Configure rabbitmq
-- echo -e "\n-------- Configuring RabbitMQ... --------\n"
+- echo "\n\n-------- Configuring RabbitMQ... --------\n"
 
 - rabbitmqctl add_user landscape $PASSWORD
 - rabbitmqctl add_vhost landscape
@@ -100,7 +101,7 @@ runcmd:
 - systemctl restart rabbitmq-server
 
 # Configure database and broker access
-- echo -e "\n-------- Configuring database and broker access... --------\n"
+- echo "\n\n-------- Configuring database and broker access... --------\n"
 
 - |
   python3 -c "
@@ -131,12 +132,12 @@ runcmd:
   "
 
 # Enable Landscape Services
-- echo -e "\n-------- Enabling RUN_ALL in defaults... --------\n"
+- echo "\n\n-------- Enabling RUN_ALL in defaults... --------\n"
 
 - sed -i 's/^RUN_ALL.*/RUN_ALL="yes"/' /etc/default/landscape-server
 
 # Configure Apache
-- echo -e "\n-------- Configuring Apache Web Server... --------\n"
+- echo "\n\n-------- Configuring Apache Web Server... --------\n"
 
 # Copy the official template included in the package
 - cp /opt/canonical/landscape/standalone/templates/apache_default.tmpl /etc/apache2/sites-available/landscape.conf
@@ -167,12 +168,12 @@ runcmd:
 - systemctl restart apache2
 
 # Run the Landscape setup script
-- echo -e "\n-------- Running Landscape Setup Script... --------\n"
+- echo "\n\n-------- Running Landscape Setup Script... --------\n"
 
 - setup-landscape-server
 
 # Start Landscape services
-- echo -e "\n-------- Starting Landscape... --------\n"
+- echo "\n\n-------- Starting Landscape... --------\n"
 
 - lsctl restart
 

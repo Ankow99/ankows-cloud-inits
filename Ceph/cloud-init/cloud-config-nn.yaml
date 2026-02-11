@@ -22,16 +22,20 @@ write_files:
   content: |
     Defaults env_keep += "EDITOR"
 
+apt:
+  sources:
+    source1:
+      source: ppa:maas/3.6
+
+snap:
+  commands:
+  - snap install juju
+
 packages:
   - git
   - neovim
   - pollinate
   - jq
-  
-snap:
-  commands:
-  - snap install maas --channel=3.6/stable
-  - snap install maas-test-db
 
 package_update: true
 package_upgrade: true
@@ -63,18 +67,41 @@ runcmd:
 - export MAAS_RESERVED_IP_START=10.0.3.200
 - export MAAS_RESERVED_IP_END=10.0.3.254
 
+- export JUJU_CONTROLLER_CPU=3
+- export JUJU_CONTROLLER_RAM=8192
+- export JUJU_CONTROLLER_DISK=20
+
 - export NODE_CPU=2
-- export NODE_RAM=4096
-- export NODE_MAIN_DISK=20
+- export NODE_RAM=8192
+- export NODE_MAIN_DISK=10
+- export NODE_OSD_DISK_1=20
+- export NODE_OSD_DISK_2=20
+- export NODE_OSD_DISK_3=20
+
+- export MON_CPU=2
+- export MON_RAM=4096
+- export MON_DISK=20
+
+- export CEPH_VERSION=squid/stable
+
+- export CEPH_OSD_VERSION=$CEPH_VERSION
+- export CEPH_MON_VERSION=$CEPH_VERSION
+- export CEPH_FS_VERSION=$CEPH_VERSION
+- export CEPH_DASHBOARD_VERSION=$CEPH_VERSION
 
 - export IP_ADDRESS=$(hostname -I | awk '{print $1}')
 - export INTERFACE=$(ip -j route show default | jq -r '.[].dev')
 
+# Install MAAS now that LXD and networking are configured
+- echo "\n\n-------- Installing MAAS... --------\n"
+
+- apt-get update
+- apt-get install -y maas
+
 # Initialise MAAS
 - echo "\n\n-------- Initializing MAAS... --------\n"
 
-- maas init region+rack --database-uri maas-test-db:/// --maas-url http://${IP_ADDRESS}:5240/MAAS
-- maas createadmin --username $ADMIN_USER --password $ADMIN_PASS --email $ADMIN_EMAIL
+- maas init --admin-username $ADMIN_USER --admin-password $ADMIN_PASS --admin-email $ADMIN_EMAIL --admin-ssh-import $SSH_KEY --rbac-url "" --candid-agent-file ""
 
 # Wait for MAAS services to be ready
 - |
@@ -168,42 +195,24 @@ runcmd:
     sleep 30
   done
 
-# Install Packer
-#- echo "\n\n-------- Installing Packer... --------\n"
-
-#- wget -O - https://apt.releases.hashicorp.com/gpg | gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
-#- echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(grep -oP '(?<=UBUNTU_CODENAME=).*' /etc/os-release || lsb_release -cs) main" | tee /etc/apt/sources.list.d/hashicorp.list
-
-#- apt-get update
-#- apt-get install -y packer make qemu-utils libnbd-bin nbdkit fuse2fs qemu-system qemu-system-modules-spice ovmf cloud-image-utils parted
-
-# Create custom Image using Packer
-#- echo "\n\n-------- Creating Custom MAAS Image using Packer... --------\n"
-
-#- git clone https://github.com/canonical/packer-maas.git /home/ubuntu/packer-maas/
-#- su -l ubuntu -c 'sudo make -C ~/packer-maas/ubuntu/ custom-cloudimg.tar.gz'
-#- mv /home/ubuntu/packer-maas/ubuntu/custom-cloudimg.tar.gz /home/ubuntu
-#- chown ubuntu:ubuntu /home/ubuntu/custom-cloudimg.tar.gz
-
-# Add custom image to MAAS
-#- echo "\n\n-------- Adding Custom Image to MAAS... --------\n"
-
-#- su ubuntu -c "maas login $ADMIN_USER 'http://localhost:5240/MAAS/' $APIKEY && maas $ADMIN_USER boot-resources create name='custom/ubuntu-tgz' title='Ubuntu Custom TGZ' architecture='amd64/generic' filetype='tgz' content@='/home/ubuntu/custom-cloudimg.tar.gz'"
-
 # Add LXD as a VM host for MAAS
 - echo "\n\n-------- Adding LXD as VM host in MAAS... --------\n"
 
 - maas $ADMIN_USER vm-hosts create type=lxd power_address=https://192.168.1.68:8443 password=password name=LXD project=$MAAS_PROJECT_NAME
 - export VM_HOST_ID=$(maas $ADMIN_USER vm-hosts read | jq -r '.[0].id')
 
-# Compose VMs using VM host (-c limits.cpu=6 -c limits.memory=12GiB --device root,size=60GiB)
+# Compose VMs using VM host (-c limits.cpu=15 -c limits.memory=44GiB --device root,size=260GiB)
 - echo "\n\n-------- Composing VM(s) using LXD... --------\n"
 
-- export SYSTEM_ID_1=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node1 | jq -r '.system_id') && echo $SYSTEM_ID_1
+- export SYSTEM_ID_1=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$JUJU_CONTROLLER_CPU memory=$JUJU_CONTROLLER_RAM storage=$JUJU_CONTROLLER_DISK hostname=controller | jq -r '.system_id') && echo $SYSTEM_ID_1
 
-- export SYSTEM_ID_2=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node2 | jq -r '.system_id') && echo $SYSTEM_ID_2
+- export SYSTEM_ID_2=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node1 | jq -r '.system_id') && echo $SYSTEM_ID_2
 
-- export SYSTEM_ID_3=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node3 | jq -r '.system_id') && echo $SYSTEM_ID_3
+- export SYSTEM_ID_3=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node2 | jq -r '.system_id') && echo $SYSTEM_ID_3
+
+- export SYSTEM_ID_4=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node3 | jq -r '.system_id') && echo $SYSTEM_ID_4
+
+- export SYSTEM_ID_5=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node4 | jq -r '.system_id') && echo $SYSTEM_ID_5
 
 # Wait for VMs to be ready
 - |
@@ -242,9 +251,134 @@ runcmd:
     sleep 60
   done
 
-# Deploy VMs using VM host
-#- echo "\n\n-------- Deploying VM(s)... --------\n"
+# Create tags and add them to commissioned machines
+- echo "\n\n-------- Creating and adding Tags... --------\n"
 
-#- maas $ADMIN_USER machine deploy $SYSTEM_ID_1 distro_series=ubuntu/noble ephemeral_deploy=false
-#- maas $ADMIN_USER machine deploy $SYSTEM_ID_2 distro_series=ubuntu/jammy ephemeral_deploy=false
+- maas $ADMIN_USER tags create name=juju
+- maas $ADMIN_USER tag update-nodes juju add=$SYSTEM_ID_1
+
+- maas $ADMIN_USER tags create name=osd
+- maas $ADMIN_USER tag update-nodes osd add=$SYSTEM_ID_2
+- maas $ADMIN_USER tag update-nodes osd add=$SYSTEM_ID_3
+- maas $ADMIN_USER tag update-nodes osd add=$SYSTEM_ID_4
+
+- maas $ADMIN_USER tags create name=mon
+- maas $ADMIN_USER tag update-nodes mon add=$SYSTEM_ID_5
+- maas $ADMIN_USER tag update-nodes mon add=$SYSTEM_ID_6
+- maas $ADMIN_USER tag update-nodes mon add=$SYSTEM_ID_7
+
+# Create MAAS Juju Cloud configuration files
+- echo "\n\n-------- Creating MAAS Juju Cloud Configs... --------\n"
+
+- |
+  cat <<EOF > /home/ubuntu/maas-cloud.yaml
+  clouds:
+    maas:
+      type: maas
+      auth-types: [oauth1]
+      endpoint: http://${IP_ADDRESS}:5240/MAAS
+  EOF
+
+- |
+  cat <<EOF > /home/ubuntu/maas-creds.yaml
+  credentials:
+    maas:
+      anyuser:
+        auth-type: oauth1
+        maas-oauth: $APIKEY
+  EOF
+
+- chown ubuntu:ubuntu /home/ubuntu/maas-*.yaml
+
+# Add MAAS as a Juju Cloud
+- echo "\n\n-------- Adding MAAS as a Juju Cloud... --------\n"
+
+- su ubuntu -c 'juju add-cloud --client -f ~/maas-cloud.yaml maas'
+
+# Add MAAS as a Juju Cloud
+- echo "\n\n-------- Adding MAAS Credentials to Juju... --------\n"
+
+- su ubuntu -c 'juju add-credential --client -f ~/maas-creds.yaml maas'
+
+# Remove config files
+- rm /home/ubuntu/maas-*.yaml
+
+# Bootstrap Juju controller
+- echo "\n\n-------- Bootstrapping Juju Controller... --------\n"
+
+- su ubuntu -c 'juju bootstrap --bootstrap-base=ubuntu@22.04 --constraints tags=juju maas juju-controller'
+
+
+# ---------------------------------------------- DEPLOY CHARMED CEPH ----------------------------------------------
+
+
+# Create Juju Model
+- echo "\n\n-------- Creating Juju Ceph Model... --------\n"
+
+- su ubuntu -c 'juju add-model --config default-base=ubuntu@22.04 ceph'
+
+# ------------------------------------------------- Deploy Ceph OSD -------------------------------------------------
+- echo "\n\n-------- Deploying Ceph OSD... --------\n"
+
+- |
+  cat <<EOF > /home/ubuntu/ceph-osd.yaml
+  ceph-osd:
+    osd-devices: /dev/sdb /dev/sdc /dev/sdd
+  EOF
+  
+- chown ubuntu:ubuntu /home/ubuntu/ceph-osd.yaml
+
+- su ubuntu -c 'juju deploy -n 3 --channel $CEPH_OSD_VERSION --config ~/ceph-osd.yaml --constraints tags=osd ceph-osd'
+
+- rm /home/ubuntu/ceph-osd.yaml
+
+# Wait for Ceph OSD to be deployed
+- echo "\n\n-------- Waiting for Ceph OSD to be deployed... --------\n"
+
+- su ubuntu -c "juju wait-for application ceph-osd --timeout=20m --query='life==\"alive\" && status==\"blocked\" && len(units) == 3'"
+
+# ---------------------------------------------- Deploy Ceph Monitor ----------------------------------------------
+- echo "\n\n-------- Deploying Ceph Monitor... --------\n"
+
+- |
+  cat <<EOF > /home/ubuntu/ceph-mon.yaml
+  ceph-mon:
+    expected-osd-count: 9
+    monitor-count: 3
+  EOF
+
+- chown ubuntu:ubuntu /home/ubuntu/ceph-mon.yaml
+
+- su ubuntu -c 'juju deploy -n 3 --channel $CEPH_MON_VERSION --config ~/ceph-mon.yaml --constraints tags=mon ceph-mon'
+
+- rm /home/ubuntu/ceph-mon.yaml
+
+# Integrate Ceph Monitor
+- echo "\n\n-------- Integrate Ceph Monitor... --------\n"
+
+- su ubuntu -c 'juju integrate ceph-mon:osd ceph-osd:mon'
+
+# Wait for Ceph Monitor to be ready
+- echo "\n\n-------- Waiting for Ceph Monitor to be ready... --------\n"
+
+- su ubuntu -c "juju wait-for application ceph-mon --timeout=20m --query='life==\"alive\" && status==\"active\" && len(units) == 3'"
+
+# ---------------------------------------------- Deploy Ceph Filesystem ----------------------------------------------
+- echo "\n\n-------- Deploying Ceph Filesystem... --------\n"
+
+- su ubuntu -c 'juju deploy -n 3 --to lxd:3,lxd:4,lxd:5 --channel $CEPH_FS_VERSION --constraints tags=mon ceph-fs'
+
+# Integrate Ceph Filesystem
+- echo "\n\n-------- Integrate Ceph Filesystem... --------\n"
+
+- su ubuntu -c 'juju integrate ceph-fs:ceph-mds ceph-mon:mds'
+
+# Wait for Ceph Filesystem to be ready
+- echo "\n\n-------- Waiting for Ceph Filesystem to be ready... --------\n"
+
+- su ubuntu -c "juju wait-for application ceph-fs --timeout=20m --query='life==\"alive\" && status==\"active\" && len(units) == 3'"
+
+
+- echo "\n\n-------- Ceph finished deploying, have fun!... --------\n"
+
 

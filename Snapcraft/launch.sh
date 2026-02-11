@@ -6,7 +6,9 @@ set +e
 VM_NAME="${1:-snapcraft}"
 IMAGE="ubuntu:24.04"
 
-CLOUD_INIT="./cloud-init/cloud-config.yaml"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
+CLOUD_INIT="$SCRIPT_DIR/cloud-init/cloud-config.yaml"
 
 CPU_LIMIT="10"
 RAM_LIMIT="10GiB"
@@ -17,7 +19,7 @@ CLR_EOL=$'\033[K'
 # --- Colors ---
 # Check if stderr is a TTY
 if [ -t 2 ]; then
-    RED='\033[0;31m'
+    RED='\033[1;31m'
     BYELLOW='\033[1;33m'
     NC='\033[0m'
 else
@@ -32,10 +34,21 @@ if [ ! -f "$CLOUD_INIT" ]; then
     exit 1
 fi
 
+# Check for jq
+if ! command -v jq &> /dev/null; then
+    echo -e "${RED}Error: 'jq' is not installed. Please install it (sudo apt install jq).${NC}"
+    exit 1
+fi
+
 # 1. Launch VM
 echo -e "${BYELLOW}-> 1. Launching LXD VM '${NC}$VM_NAME${BYELLOW}' (${NC}$IMAGE${BYELLOW}) with CPU: ${NC}$CPU_LIMIT${BYELLOW} cores ; RAM: ${NC}$RAM_LIMIT${BYELLOW} ; DISK: ${NC}$DISK_LIMIT"
 echo ""
 lxc launch "$IMAGE" "$VM_NAME" --vm -c limits.cpu="$CPU_LIMIT" -c limits.memory="$RAM_LIMIT" --device root,size="$DISK_LIMIT" -c cloud-init.user-data="$(cat "$CLOUD_INIT")"
+
+if [ $? -ne 0 ]; then
+    echo -e "${RED}Error: Failed to launch VM. Exiting.${NC}"
+    exit 1
+fi
 
 # 2. Watch for IP Address
 echo ""
@@ -60,7 +73,7 @@ FINISHED=0
 
 while [ $FINISHED -eq 0 ]; do
     # Try to SSH and Tail the log
-    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t "ubuntu@$IP" "tail -f /var/log/cloud-init-output.log 2>/dev/null | sed '/finished at/ q'"
+    ssh -q -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t "ubuntu@$IP" "tail -f /var/log/cloud-init-output.log 2>/dev/null | sed '/finished at/ q'"
     
     # Check why SSH exited
     EXIT_CODE=$?
@@ -85,4 +98,4 @@ done
 echo ""
 echo -e "${BYELLOW}-> 4. Dropping into interactive shell... ${NC}"
 echo ""
-ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$IP"
+ssh -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$IP"

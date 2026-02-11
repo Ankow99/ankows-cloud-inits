@@ -6,8 +6,11 @@ set +e
 VM_NAME="openstack"
 IMAGE="ubuntu:24.04"
 
-CLOUD_INIT="./cloud-init/cloud-config.yaml"
-CLOUD_INIT_DEVSTACK="./cloud-init/cloud-config-devstack.yaml"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
+CLOUD_INIT="$SCRIPT_DIR/cloud-init/cloud-config.yaml"
+CLOUD_INIT_NN="$SCRIPT_DIR/cloud-init/cloud-config-nn.yaml"
+CLOUD_INIT_DEVSTACK="$SCRIPT_DIR/cloud-init/cloud-config-devstack.yaml"
 
 CPU_LIMIT="20"
 RAM_LIMIT="50GiB"
@@ -18,32 +21,56 @@ CLEAR_REST='\033[J'
 CLR_EOL=$'\033[K'
 
 DEVSTACK_MODE=false
+NO_NEST=false
+PROFILE="default"
+MAAS_PROJECT_NAME="maas"
+CUSTOM_NAME_SET=false
 
 # --- Argument Parsing ---
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dev)
-            echo -e "${BYELLOW}-> Switch enabled: Using devstack cloud-init config. ${NC}"
-            echo ""
-            CLOUD_INIT="$CLOUD_INIT_DEVSTACK"
-            VM_NAME="devstack"
-            CPU_LIMIT="15"
-            RAM_LIMIT="40GiB"
-            DISK_LIMIT="100GiB"
             DEVSTACK_MODE=true
+            shift 1
+            ;;
+        --nn)
+            NO_NEST=true
             shift 1
             ;;
         *)
             VM_NAME="$1"
+            CUSTOM_NAME_SET=true
             shift 1
             ;;
     esac
 done
 
+
+if [ "$NO_NEST" = true ]; then
+    echo -e "${BYELLOW}-> Switch enabled: Using non nested LXD cloud-init config. ${NC}"
+    echo ""
+    CLOUD_INIT="$CLOUD_INIT_NN"
+    CPU_LIMIT="2"
+    RAM_LIMIT="6GiB"
+    DISK_LIMIT="20GiB"
+    PROFILE="maas"
+
+elif [ "$DEVSTACK_MODE" = true ]; then
+    echo -e "${BYELLOW}-> Switch enabled: Using devstack cloud-init config. ${NC}"
+    echo ""
+    CLOUD_INIT="$CLOUD_INIT_DEVSTACK"
+    if [ "$CUSTOM_NAME_SET" = false ]; then
+        VM_NAME="devstack"
+    fi
+    CPU_LIMIT="15"
+    RAM_LIMIT="40GiB"
+    DISK_LIMIT="100GiB"
+fi
+
 # --- Colors ---
 # Check if stderr is a TTY
 if [ -t 2 ]; then
-    RED='\033[0;31m'
+    RED='\033[1;31m'
     BYELLOW='\033[1;33m'
     NC='\033[0m'
 else
@@ -58,10 +85,21 @@ if [ ! -f "$CLOUD_INIT" ]; then
     exit 1
 fi
 
+# Check for jq
+if ! command -v jq &> /dev/null; then
+    echo -e "${RED}Error: 'jq' is not installed. Please install it (sudo apt install jq).${NC}"
+    exit 1
+fi
+
 # 1. Launch VM
 echo -e "${BYELLOW}-> 1. Launching LXD VM '${NC}$VM_NAME${BYELLOW}' (${NC}$IMAGE${BYELLOW}) with CPU: ${NC}$CPU_LIMIT${BYELLOW} cores ; RAM: ${NC}$RAM_LIMIT${BYELLOW} ; DISK: ${NC}$DISK_LIMIT"
 echo ""
-lxc launch "$IMAGE" "$VM_NAME" --vm -c limits.cpu="$CPU_LIMIT" -c limits.memory="$RAM_LIMIT" --device root,size="$DISK_LIMIT" -c cloud-init.user-data="$(cat "$CLOUD_INIT")"
+lxc launch "$IMAGE" "$VM_NAME" --vm --profile $PROFILE -c limits.cpu="$CPU_LIMIT" -c limits.memory="$RAM_LIMIT" --device root,size="$DISK_LIMIT" -c cloud-init.user-data="$(cat "$CLOUD_INIT")"
+
+if [ $? -ne 0 ]; then
+    echo -e "${RED}Error: Failed to launch VM. Exiting.${NC}"
+    exit 1
+fi
 
 # 2. Watch for IP Address
 echo ""
@@ -76,7 +114,6 @@ done
 echo "Target IP: $IP"
 echo ""
 lxc list
-
 
 if [ "$DEVSTACK_MODE" == "false" ]; then
     # 3. Wait for cloud-init to finish and tail logs and then Juju watch
@@ -94,13 +131,13 @@ if [ "$DEVSTACK_MODE" == "false" ]; then
         # PHASE A: LOG TAILING
         if [ "$PHASE" == "LOG_TAIL" ]; then
             # We use sed to quit 'q' if we see the Trigger Message OR "finished at"
-            ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t "ubuntu@$IP" "tail -f /var/log/cloud-init-output.log 2>/dev/null | sed '/$JUJU_TRIGGER_MSG/ q; /finished at/ q'"
+            ssh -q -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t "ubuntu@$IP" "tail -f /var/log/cloud-init-output.log 2>/dev/null | sed '/$JUJU_TRIGGER_MSG/ q; /finished at/ q'"
             
             EXIT_CODE=$?
 
             if [ $EXIT_CODE -eq 0 ]; then
                 # Success! The 'sed' command found the Juju model deploy start and quit cleanly.
-                STATUS_CHECK=$(ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$IP" "cloud-init status" 2>/dev/null)
+                STATUS_CHECK=$(ssh -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$IP" "cloud-init status" 2>/dev/null)
                 
                 if [[ "$STATUS_CHECK" == *"status: done"* ]]; then
                     echo ""
@@ -128,10 +165,10 @@ if [ "$DEVSTACK_MODE" == "false" ]; then
         if [ "$PHASE" == "JUJU_WATCH" ]; then
 
             # Capture both status commands first
-            JUJU_OUTPUT=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$IP" "juju status --color" 2>/dev/null)
-            LOG_OUTPUT=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$IP" "tail -n 7 /var/log/cloud-init-output.log" 2>/dev/null)
+            JUJU_OUTPUT=$(ssh -q -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$IP" "juju status --color" 2>/dev/null)
+            LOG_OUTPUT=$(ssh -q -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$IP" "tail -n 7 /var/log/cloud-init-output.log" 2>/dev/null)
             SSH_EXIT=$?
-            CI_STATUS=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$IP" "cloud-init status" 2>/dev/null)
+            CI_STATUS=$(ssh -q -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$IP" "cloud-init status" 2>/dev/null)
 
             # Check if we should stop (Is cloud-init done?)
             if [[ "$CI_STATUS" == *"status: done"* ]]; then
@@ -183,19 +220,21 @@ if [ "$DEVSTACK_MODE" == "false" ]; then
         fi
     done
 
-    # 5. Set ip route
-    echo ""
-    echo -e "${BYELLOW}-> 5. Setting IP route for Horizon Dashboard... ${NC}"
-    echo ""
+    if [[ "$NO_NEST" == "false" ]]; then
+        # 5. Set ip route
+        echo ""
+        echo -e "${BYELLOW}-> 5. Setting IP route for Horizon Dashboard... ${NC}"
+        echo ""
 
-    sudo ip r add 10.10.20.0/24 via $IP dev lxdbr0
+        sudo ip r add 10.10.20.0/24 via $IP dev lxdbr0 || true
+    fi
 
     # 6. Obtain Horizon dashboard IP
     echo ""
     echo -e "${BYELLOW}-> 6. Obtaining Horizon Dashboard Leader IP... ${NC}"
     echo ""
 
-    DASHBOARD_IP=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$IP" "juju exec --unit openstack-dashboard/leader -- unit-get public-address" 2>/dev/null)
+    DASHBOARD_IP=$(ssh -q -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$IP" "juju exec --unit openstack-dashboard/leader -- unit-get public-address" 2>/dev/null)
 
     echo "Horizon Dashboard Leader IP: $DASHBOARD_IP"
 
@@ -217,11 +256,63 @@ if [ "$DEVSTACK_MODE" == "false" ]; then
         xdg-open "http://$IP:5240/MAAS/" > /dev/null 2>&1 &
     fi
 
-    # 9. Final Interactive Shell
+    # 9. Generate Cleanup Script
+    CLEANUP_SCRIPT="./destroy-${VM_NAME}.sh"
+
+    cat << EOF > "$CLEANUP_SCRIPT"
+#!/bin/bash
+
+echo -e "${BYELLOW}----- Starting Cleanup for $VM_NAME -----${NC}"
+echo ""
+
+# 1. Delete the VM
+echo -e "${BYELLOW}-> 1. Deleting LXD VM: $VM_NAME... ${NC}"
+echo ""
+if lxc info "$VM_NAME" >/dev/null 2>&1; then
+    
+    lxc delete -f "$VM_NAME"
+else
+    echo -e "VM '$VM_NAME' not found, skipping..."
     echo ""
-    echo -e "${BYELLOW}-> 9. Dropping into interactive shell... ${NC}"
+fi
+
+if [[ "$NO_NEST" == "true" ]]; then
+    # 2. Delete the LXD project created by MAAS
+    echo -e "${BYELLOW}-> 2. Cleaning up LXD project: $MAAS_PROJECT_NAME... ${NC}"
     echo ""
-    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$IP"
+    if lxc project list | grep -q " $MAAS_PROJECT_NAME "; then
+        # Delete all instances inside the $MAAS_PROJECT_NAME project first
+        echo "Stopping and deleting all instances in project '$MAAS_PROJECT_NAME'..."
+        for inst in \$(lxc list --project $MAAS_PROJECT_NAME --format json | jq -r '.[].name'); do
+            lxc delete -f --project $MAAS_PROJECT_NAME "\$inst"
+        done
+        
+        # Switch to default to ensure we aren't "inside" the project we are deleting
+        lxc project switch default >/dev/null 2>&1
+        lxc project delete $MAAS_PROJECT_NAME
+        echo ""
+    else
+        echo "LXD project '$MAAS_PROJECT_NAME' not found, skipping..."
+        echo ""
+    fi
+else
+    sudo ip r del 10.10.20.0/24 via $IP dev lxdbr0
+fi
+
+echo -e "${BYELLOW}----- Cleanup Complete -----${NC}"
+rm -- "\$0"
+EOF
+
+    chmod +x "$CLEANUP_SCRIPT"
+    echo ""
+    echo -e "${BYELLOW}-> 9. Cleanup script created: $CLEANUP_SCRIPT ${NC}"
+
+
+    # 10. Final Interactive Shell
+    echo ""
+    echo -e "${BYELLOW}-> 10. Dropping into interactive shell... ${NC}"
+    echo ""
+    ssh -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$IP"
 
 else
 
@@ -234,7 +325,7 @@ else
 
     while [ $FINISHED -eq 0 ]; do
         # Try to SSH and Tail the log
-        ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t "ubuntu@$IP" "tail -f /var/log/cloud-init-output.log 2>/dev/null | sed '/finished at/ q'"
+        ssh -q -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t "ubuntu@$IP" "tail -f /var/log/cloud-init-output.log 2>/dev/null | sed '/finished at/ q'"
         
         # Check why SSH exited
         EXIT_CODE=$?
@@ -268,5 +359,5 @@ else
     echo ""
     echo -e "${BYELLOW}-> 5. Dropping into interactive shell... ${NC}"
     echo ""
-    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$IP"
+    ssh -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$IP"
 fi

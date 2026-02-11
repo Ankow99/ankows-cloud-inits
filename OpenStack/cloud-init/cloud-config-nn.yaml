@@ -4,22 +4,6 @@ ssh_authorized_keys: [ssh-ed25519 AAAAC3...]
 ssh_genkeytypes: [ed25519]
 
 write_files:
-- path: /etc/netplan/60-lxdbr0.yaml
-  permissions: '0600'
-  content: |
-    network:
-      version: 2
-      bridges:
-        lxdbr0:
-          addresses: [10.10.20.1/24]
-          parameters:
-            stp: false
-            forward-delay: 0
-
-- path: /etc/sysctl.d/99-maas-nat.conf
-  content: |
-    net.ipv4.ip_forward=1
-
 - path: /etc/profile.d/maas-login.sh
   permissions: '0644'
   content: |
@@ -38,34 +22,11 @@ write_files:
   content: |
     Defaults env_keep += "EDITOR"
 
-lxd:
-  preseed: |
-    config:
-      core.https_address: '[::]:8444'
-      core.trust_password: password
-    storage_pools:
-    - config:
-        size: 240GB
-      description: ""
-      name: default
-      driver: zfs 
-    profiles:
-    - config: {}
-      description: ""
-      devices:
-        root:
-          path: /
-          pool: default
-          type: disk
-      name: default
-    projects: []
-    cluster: null
-
 apt:
   sources:
     source1:
       source: ppa:maas/3.6
-      
+
 snap:
   commands:
   - snap install juju
@@ -77,8 +38,6 @@ packages:
   - neovim
   - pollinate
   - jq
-  - iptables-persistent
-#  - nginx
 
 package_update: true
 package_upgrade: true
@@ -102,16 +61,16 @@ runcmd:
 - export ADMIN_PASS=admin
 - export ADMIN_EMAIL=admin@mail.com
 
-- export GATEWAY=10.10.20.1
-- export SUBNET=10.10.20.0/24
+- export GATEWAY=10.0.0.1
+- export SUBNET=10.0.0.0/22
 
-- export MAAS_PROJECT_NAME=$(hostname)
+- export MAAS_PROJECT_NAME=maas
 - export MAAS_DNS=8.8.8.8
-- export MAAS_RESERVED_IP_START=10.10.20.200
-- export MAAS_RESERVED_IP_END=10.10.20.254
+- export MAAS_RESERVED_IP_START=10.0.3.200
+- export MAAS_RESERVED_IP_END=10.0.3.254
 
-- export OS_RESERVED_IP_START=10.10.20.100
-- export OS_RESERVED_IP_END=10.10.20.199
+- export OS_RESERVED_IP_START=10.0.3.100
+- export OS_RESERVED_IP_END=10.0.3.199
 
 - export JUJU_CONTROLLER_CPU=3
 - export JUJU_CONTROLLER_RAM=8192
@@ -156,23 +115,6 @@ runcmd:
 
 - export IP_ADDRESS=$(hostname -I | awk '{print $1}')
 - export INTERFACE=$(ip -j route show default | jq -r '.[].dev')
-
-# Make the bridge active on the first boot
-- echo "\n\n-------- Applying and attaching network bridge... --------\n"
-
-- netplan apply
-
-# Attach lxdbr0 bridge to LXD default profile
-- lxc network attach-profile lxdbr0 default
-
-# Fetch IPv4 address from the device, setup forwarding and NAT
-- echo "\n\n-------- Configuring Port Forwarding and NAT... --------\n"
-
-- sysctl -p /etc/sysctl.d/99-maas-nat.conf
-- iptables -t nat -A POSTROUTING -o $INTERFACE -j SNAT --to $IP_ADDRESS
-
-# Persist NAT configuration
-- netfilter-persistent save
 
 # Install MAAS now that LXD and networking are configured
 - echo "\n\n-------- Installing MAAS... --------\n"
@@ -227,7 +169,6 @@ runcmd:
 # Configure boot images
 - echo "\n\n-------- Configuring MAAS boot images... --------\n"
 
-#- maas $ADMIN_USER boot-sources create url=$URL keyring_filename=$KEYRING_FILE
 - export BOOT_SOURCE_ID=$(maas $ADMIN_USER boot-sources read | jq -r '.[0].id')
 
 - maas $ADMIN_USER boot-source-selections create $BOOT_SOURCE_ID os="ubuntu" release="noble" arches="amd64" labels='*' subarches='*'
@@ -282,7 +223,7 @@ runcmd:
 # Add LXD as a VM host for MAAS
 - echo "\n\n-------- Adding LXD as VM host in MAAS... --------\n"
 
-- maas $ADMIN_USER vm-hosts create type=lxd power_address=https://${IP_ADDRESS}:8444 password=password name=LXD project=$MAAS_PROJECT_NAME
+- maas $ADMIN_USER vm-hosts create type=lxd power_address=https://192.168.1.68:8443 password=password name=LXD project=$MAAS_PROJECT_NAME
 - export VM_HOST_ID=$(maas $ADMIN_USER vm-hosts read | jq -r '.[0].id')
 
 # Compose VMs using VM host (-c limits.cpu=15 -c limits.memory=40GiB --device root,size=220GiB)
@@ -960,66 +901,5 @@ runcmd:
 
 - su ubuntu -c '/home/ubuntu/openstack-config.sh'
 
-# --------------------------------------------- Set up reverse nginx proxy ---------------------------------------------
-#- echo "\n-------- Set up reverse nginx proxy... --------\n"
-
-# Obtain Horizon Dashboard IP address
-#- export HORIZON_IP=$(su ubuntu -c 'juju show-unit openstack-dashboard/0 --format json' | jq -r '."openstack-dashboard/0"."public-address"')
-
-#- |
-#  cat <<EOF > /etc/nginx/sites-available/horizon_proxy
-#  server {
-#    listen 80;
-#    server_name $IP_ADDRESS;
-#    
-#    location = / {
-#      return 302 /horizon/;
-#    }
-#    
-#    location /horizon/ {
-#      proxy_pass http://${HORIZON_IP}/horizon/;
-#      proxy_set_header Host \$host;
-#      proxy_set_header X-Real-IP \$remote_addr;
-#      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-#      proxy_set_header X-Forwarded-Proto \$scheme;
-#      proxy_redirect http://${HORIZON_IP}/horizon/ /horizon/;
-#      proxy_redirect default;
-#      
-#      proxy_http_version 1.1;
-#      proxy_set_header Upgrade \$http_upgrade;
-#      proxy_set_header Connection "upgrade";
-#    }
-#    
-#    location /static/ {
-#      proxy_pass http://${HORIZON_IP}/static/;
-#      proxy_set_header Host \$host;
-#      proxy_set_header X-Real-IP \$remote_addr;
-#      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-#      proxy_set_header X-Forwarded-Proto \$scheme;
-#    }
-#    
-#    location /websockify {
-#      proxy_pass http://${HORIZON_IP}/websockify;
-#      proxy_http_version 1.1;
-#      proxy_set_header Upgrade \$http_upgrade;
-#      proxy_set_header Connection "upgrade";
-#      proxy_set_header Host \$host;
-#      proxy_set_header X-Real-IP \$remote_addr;
-#    }
-#  }
-#  EOF
-
-# Enable Reverse Proxy
-#- ln -s /etc/nginx/sites-available/horizon_proxy /etc/nginx/sites-enabled/horizon_proxy
-#- rm /etc/nginx/sites-enabled/default
-#- nginx -t
-#- systemctl start nginx
-
-# Prevent SSL to be enforced and disable secure cookies
-#- echo "\n-------- Disabling secure cookies on dashboard... --------\n"
-
-#- su ubuntu -c 'juju config openstack-dashboard enforce-ssl=false'
-#- su ubuntu -c "juju ssh openstack-dashboard/leader \"echo -e '\nSESSION_COOKIE_SECURE = False\nCSRF_COOKIE_SECURE = False' | sudo tee -a /etc/openstack-dashboard/local_settings.py && sudo systemctl restart apache2\""
-
-- echo "\n\n-------- Finished deploying charmed OpenStack, have fun!... --------\n"
+- echo "\n\n-------- Finished deploying non-nested charmed OpenStack, have fun!... --------\n"
 

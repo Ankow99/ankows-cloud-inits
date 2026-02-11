@@ -4,22 +4,6 @@ ssh_authorized_keys: [ssh-ed25519 AAAAC3...]
 ssh_genkeytypes: [ed25519]
 
 write_files:
-- path: /etc/netplan/60-lxdbr0.yaml
-  permissions: '0600'
-  content: |
-    network:
-      version: 2
-      bridges:
-        lxdbr0:
-          addresses: [10.10.20.1/24]
-          parameters:
-            stp: false
-            forward-delay: 0
-
-- path: /etc/sysctl.d/99-maas-nat.conf
-  content: |
-    net.ipv4.ip_forward=1
-
 - path: /etc/profile.d/maas-login.sh
   permissions: '0644'
   content: |
@@ -38,34 +22,11 @@ write_files:
   content: |
     Defaults env_keep += "EDITOR"
 
-lxd:
-  preseed: |
-    config:
-      core.https_address: '[::]:8444'
-      core.trust_password: password
-    storage_pools:
-    - config:
-        size: 160GB
-      description: ""
-      name: default
-      driver: zfs 
-    profiles:
-    - config: {}
-      description: ""
-      devices:
-        root:
-          path: /
-          pool: default
-          type: disk
-      name: default
-    projects: []
-    cluster: null
-
 apt:
   sources:
     source1:
       source: ppa:maas/3.6
-      
+
 snap:
   commands:
   - snap install juju
@@ -75,7 +36,6 @@ packages:
   - neovim
   - pollinate
   - jq
-  - iptables-persistent
 
 package_update: true
 package_upgrade: true
@@ -104,13 +64,13 @@ runcmd:
 - export ADMIN_PASS=admin
 - export ADMIN_EMAIL=admin@mail.com
 
-- export GATEWAY=10.10.20.1
-- export SUBNET=10.10.20.0/24
+- export GATEWAY=10.0.0.1
+- export SUBNET=10.0.0.0/22
 
-- export MAAS_PROJECT_NAME=$(hostname)
+- export MAAS_PROJECT_NAME=maas
 - export MAAS_DNS=8.8.8.8
-- export MAAS_RESERVED_IP_START=10.10.20.200
-- export MAAS_RESERVED_IP_END=10.10.20.254
+- export MAAS_RESERVED_IP_START=10.0.3.200
+- export MAAS_RESERVED_IP_END=10.0.3.254
 
 - export JUJU_CONTROLLER_CPU=2
 - export JUJU_CONTROLLER_RAM=8192
@@ -136,23 +96,6 @@ runcmd:
 - export IP_ADDRESS=$(hostname -I | awk '{print $1}')
 - export INTERFACE=$(ip -j route show default | jq -r '.[].dev')
 - export LANDSCAPE_FQDN=$(hostname -f)
-
-# Make the bridge active on the first boot
-- echo "\n\n-------- Applying and attaching network bridge... --------\n"
-
-- netplan apply
-
-# Attach lxdbr0 bridge to LXD default profile
-- lxc network attach-profile lxdbr0 default
-
-# Fetch IPv4 address from the device, setup forwarding and NAT
-- echo "\n\n-------- Configuring Port Forwarding and NAT... --------\n"
-
-- sysctl -p /etc/sysctl.d/99-maas-nat.conf
-- iptables -t nat -A POSTROUTING -o $INTERFACE -j SNAT --to $IP_ADDRESS
-
-# Persist NAT configuration
-- netfilter-persistent save
 
 # Install MAAS now that LXD and networking are configured
 - echo "\n\n-------- Installing MAAS... --------\n"
@@ -260,7 +203,7 @@ runcmd:
 # Add LXD as a VM host for MAAS
 - echo "\n\n-------- Adding LXD as VM host in MAAS... --------\n"
 
-- maas $ADMIN_USER vm-hosts create type=lxd power_address=https://${IP_ADDRESS}:8444 password=password name=LXD project=$MAAS_PROJECT_NAME
+- maas $ADMIN_USER vm-hosts create type=lxd power_address=https://192.168.1.68:8443 password=password name=LXD project=$MAAS_PROJECT_NAME
 - export VM_HOST_ID=$(maas $ADMIN_USER vm-hosts read | jq -r '.[0].id')
 
 # Compose VMs using VM host (-c limits.cpu=13 -c limits.memory=36GiB --device root,size=150GiB)
@@ -274,7 +217,7 @@ runcmd:
 
 - export SYSTEM_ID_4=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node3 | jq -r '.system_id') && echo $SYSTEM_ID_4
 
-- export SYSTEM_ID_5=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$CLIENT_CPU memory=$CLIENT_RAM storage=$CLIENT_MAIN_DISK hostname=client | jq -r '.system_id') && echo $SYSTEM_ID_5
+- export SYSTEM_ID_5=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node4 | jq -r '.system_id') && echo $SYSTEM_ID_5
 
 # Wait for VMs to be ready
 - |
@@ -525,5 +468,6 @@ runcmd:
 - su ubuntu -c "juju wait-for application landscape-client --timeout=20m --query='life==\"alive\"'"
 
 
-- echo "\n\n-------- Finished deploying Charmed Landscape HA on-prem, have fun! --------\n"
+- echo "\n\n-------- Finished deploying non-nested Charmed Landscape HA on-prem, have fun! --------\n"
+
 
