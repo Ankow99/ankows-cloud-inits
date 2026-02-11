@@ -334,7 +334,7 @@ cd Landscape
 │   ├── cloud-init/
 │   │   ├── cloud-config.yaml           # Deb MAAS (Default)
 │   │   ├── cloud-config-nn.yaml        # Non-nested deb MAAS --nn
-│   │   └── cloud-config-snap.yaml      # Snap MAAS --snap
+│   │   ├── cloud-config-snap.yaml      # Snap MAAS --snap
 │   │   └── cloud-config-snap-nn.yaml   # Non-nested snap MAAS --nn + --snap (Currently not working)
 │   └── launch.sh
 ├── OpenStack/
