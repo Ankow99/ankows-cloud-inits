@@ -1,6 +1,6 @@
 #cloud-config
 ssh_import_id: ['lp:pgdg99']
-ssh_authorized_keys: [ssh-ed25519 AAAAC3...]
+ssh_authorized_keys: [ssh-ed25519 AAAAC3...
 ssh_genkeytypes: [ed25519]
 
 write_files:
@@ -192,7 +192,14 @@ runcmd:
       ssh_authorized_keys:
         - $(cat /root/.ssh/id_rsa.pub)
   runcmd:
+    # Enable Root Login in SSH config
     - sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+    
+    # Force overwrite authorized_keys to remove the "Please login as ubuntu" restriction
+    - echo "$(cat /root/.ssh/id_rsa.pub)" > /root/.ssh/authorized_keys
+    - chmod 600 /root/.ssh/authorized_keys
+    
+    # Reload SSH to apply changes
     - systemctl reload ssh
   EOF
 
