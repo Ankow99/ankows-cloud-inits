@@ -249,7 +249,7 @@ if [ "$JUJU_MODE" == "true" ]; then
     fi
 
     # 6. Generate Cleanup Script
-    CLEANUP_SCRIPT="./destroy-${VM_NAME}.sh"
+    CLEANUP_SCRIPT="$SCRIPT_DIR/destroy-${VM_NAME}.sh"
 
     cat << EOF > "$CLEANUP_SCRIPT"
 #!/bin/bash
@@ -279,6 +279,18 @@ if [[ "$NO_NEST" == "true" ]]; then
             lxc delete -f --project $MAAS_PROJECT_NAME "\$inst"
         done
         
+        # Delete all storage volumes inside the $MAAS_PROJECT_NAME project
+        echo "Deleting storage volumes in project '$MAAS_PROJECT_NAME'..."
+        for vol in \$(lxc storage volume list default --project $MAAS_PROJECT_NAME --format json | jq -r '.[] | select(.type=="custom") | .name'); do
+            lxc storage volume delete default "\$vol" --project $MAAS_PROJECT_NAME
+        done
+
+        # Delete all images inside the $MAAS_PROJECT_NAME project
+        echo "Deleting images in project '$MAAS_PROJECT_NAME'..."
+        for img in \$(lxc image list --project $MAAS_PROJECT_NAME --format json | jq -r '.[].fingerprint'); do
+            lxc image delete --project $MAAS_PROJECT_NAME "\$img"
+        done
+
         # Switch to default to ensure we aren't "inside" the project we are deleting
         lxc project switch default >/dev/null 2>&1
         lxc project delete $MAAS_PROJECT_NAME
@@ -403,7 +415,7 @@ else
         fi
 
         # 10. Generate Cleanup Script
-        CLEANUP_SCRIPT="./destroy-${VM_NAME}.sh"
+        CLEANUP_SCRIPT="$SCRIPT_DIR/destroy-${VM_NAME}.sh"
 
         cat << EOF > "$CLEANUP_SCRIPT"
 #!/bin/bash

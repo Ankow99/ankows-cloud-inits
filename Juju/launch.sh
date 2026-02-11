@@ -161,7 +161,7 @@ if command -v xdg-open &> /dev/null; then
 fi
 
 # 5. Generate Cleanup Script
-CLEANUP_SCRIPT="./destroy-${VM_NAME}.sh"
+CLEANUP_SCRIPT="$SCRIPT_DIR/destroy-${VM_NAME}.sh"
 
 cat << EOF > "$CLEANUP_SCRIPT"
 #!/bin/bash
@@ -189,6 +189,18 @@ if [[ "$NO_NEST" == "true" ]]; then
         echo "Stopping and deleting all instances in project '$MAAS_PROJECT_NAME'..."
         for inst in \$(lxc list --project $MAAS_PROJECT_NAME --format json | jq -r '.[].name'); do
             lxc delete -f --project $MAAS_PROJECT_NAME "\$inst"
+        done
+
+        # Delete all storage volumes inside the $MAAS_PROJECT_NAME project
+        echo "Deleting storage volumes in project '$MAAS_PROJECT_NAME'..."
+        for vol in \$(lxc storage volume list default --project $MAAS_PROJECT_NAME --format json | jq -r '.[] | select(.type=="custom") | .name'); do
+            lxc storage volume delete default "\$vol" --project $MAAS_PROJECT_NAME
+        done
+
+        # Delete all images inside the $MAAS_PROJECT_NAME project
+        echo "Deleting images in project '$MAAS_PROJECT_NAME'..."
+        for img in \$(lxc image list --project $MAAS_PROJECT_NAME --format json | jq -r '.[].fingerprint'); do
+            lxc image delete --project $MAAS_PROJECT_NAME "\$img"
         done
         
         # Switch to default to ensure we aren't "inside" the project we are deleting
