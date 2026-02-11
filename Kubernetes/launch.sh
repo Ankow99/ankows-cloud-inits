@@ -25,6 +25,7 @@ JUJU_MODE=true
 NO_NEST=false
 MICRO_MODE=false
 THW_MODE=false
+PROFILE="default"
 MAAS_PROJECT_NAME="maas"
 CUSTOM_NAME_SET=false
 
