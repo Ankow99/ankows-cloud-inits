@@ -198,7 +198,7 @@ WIP - As of right now, these labs only create an empty Juju model.
 ### -  Kubernetes "The Hard Way" (--thw)
 This lab automates the manual bootstrap process of a Kubernetes cluster without using Kubeadm or Snap. It manually manages certificates, etcd, and CNI networking.
 
-* Resources: 8 vCPUs, 16GB RAM.
+* Resources: 8 vCPUs, 18GB RAM.
 * Topology (3 Nested VMs):
     * `server`: Control Plane + etcd
     * `node-0`: Worker Node
