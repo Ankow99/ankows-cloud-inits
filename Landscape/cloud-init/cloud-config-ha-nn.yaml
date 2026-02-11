@@ -203,7 +203,7 @@ runcmd:
 # Add LXD as a VM host for MAAS
 - echo "\n\n-------- Adding LXD as VM host in MAAS... --------\n"
 
-- maas $ADMIN_USER vm-hosts create type=lxd power_address=https://192.168.1.68:8443 password=password name=LXD project=$MAAS_PROJECT_NAME
+- maas $ADMIN_USER vm-hosts create type=lxd power_address=https://192.168.1.68:8443 password=thinkpadp16-lxd name=LXD project=$MAAS_PROJECT_NAME
 - export VM_HOST_ID=$(maas $ADMIN_USER vm-hosts read | jq -r '.[0].id')
 
 # Compose VMs using VM host (-c limits.cpu=13 -c limits.memory=36GiB --device root,size=150GiB)
@@ -217,7 +217,7 @@ runcmd:
 
 - export SYSTEM_ID_4=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node3 | jq -r '.system_id') && echo $SYSTEM_ID_4
 
-- export SYSTEM_ID_5=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node4 | jq -r '.system_id') && echo $SYSTEM_ID_5
+- export SYSTEM_ID_5=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$CLIENT_CPU memory=$CLIENT_RAM storage=$CLIENT_MAIN_DISK hostname=client | jq -r '.system_id') && echo $SYSTEM_ID_5
 
 # Wait for VMs to be ready
 - |

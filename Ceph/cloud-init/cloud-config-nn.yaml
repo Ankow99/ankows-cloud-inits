@@ -198,7 +198,7 @@ runcmd:
 # Add LXD as a VM host for MAAS
 - echo "\n\n-------- Adding LXD as VM host in MAAS... --------\n"
 
-- maas $ADMIN_USER vm-hosts create type=lxd power_address=https://192.168.1.68:8443 password=password name=LXD project=$MAAS_PROJECT_NAME
+- maas $ADMIN_USER vm-hosts create type=lxd power_address=https://192.168.1.68:8443 password=thinkpadp16-lxd name=LXD project=$MAAS_PROJECT_NAME
 - export VM_HOST_ID=$(maas $ADMIN_USER vm-hosts read | jq -r '.[0].id')
 
 # Compose VMs using VM host (-c limits.cpu=15 -c limits.memory=44GiB --device root,size=260GiB)
@@ -206,13 +206,17 @@ runcmd:
 
 - export SYSTEM_ID_1=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$JUJU_CONTROLLER_CPU memory=$JUJU_CONTROLLER_RAM storage=$JUJU_CONTROLLER_DISK hostname=controller | jq -r '.system_id') && echo $SYSTEM_ID_1
 
-- export SYSTEM_ID_2=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node1 | jq -r '.system_id') && echo $SYSTEM_ID_2
+- export SYSTEM_ID_2=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage="root:$NODE_MAIN_DISK,disk1:$NODE_OSD_DISK_1,disk2:$NODE_OSD_DISK_2,disk3:$NODE_OSD_DISK_3" hostname=osd1 | jq -r '.system_id') && echo $SYSTEM_ID_2
 
-- export SYSTEM_ID_3=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node2 | jq -r '.system_id') && echo $SYSTEM_ID_3
+- export SYSTEM_ID_3=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage="root:$NODE_MAIN_DISK,disk1:$NODE_OSD_DISK_1,disk2:$NODE_OSD_DISK_2,disk3:$NODE_OSD_DISK_3" hostname=osd2 | jq -r '.system_id') && echo $SYSTEM_ID_3
 
-- export SYSTEM_ID_4=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node3 | jq -r '.system_id') && echo $SYSTEM_ID_4
+- export SYSTEM_ID_4=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage="root:$NODE_MAIN_DISK,disk1:$NODE_OSD_DISK_1,disk2:$NODE_OSD_DISK_2,disk3:$NODE_OSD_DISK_3" hostname=osd3 | jq -r '.system_id') && echo $SYSTEM_ID_4
 
-- export SYSTEM_ID_5=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$NODE_CPU memory=$NODE_RAM storage=$NODE_MAIN_DISK hostname=node4 | jq -r '.system_id') && echo $SYSTEM_ID_5
+- export SYSTEM_ID_5=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$MON_CPU memory=$MON_RAM storage=$MON_DISK hostname=mon1 | jq -r '.system_id') && echo $SYSTEM_ID_5
+
+- export SYSTEM_ID_6=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$MON_CPU memory=$MON_RAM storage=$MON_DISK hostname=mon2 | jq -r '.system_id') && echo $SYSTEM_ID_6
+
+- export SYSTEM_ID_7=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$MON_CPU memory=$MON_RAM storage=$MON_DISK hostname=mon3 | jq -r '.system_id') && echo $SYSTEM_ID_7
 
 # Wait for VMs to be ready
 - |
