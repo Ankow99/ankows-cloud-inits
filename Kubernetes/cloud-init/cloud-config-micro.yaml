@@ -51,7 +51,7 @@ runcmd:
 - chown -R ubuntu ~/.kube
 
 - microk8s enable dns
-- microk8s enable dashboard
+#- microk8s enable dashboard (DEPRECATED)
 - microk8s enable hostpath-storage
 
 # Wait for Pods to be ready
@@ -96,9 +96,9 @@ runcmd:
   done
 
 # Authorize MicroK8s dashboard
-- echo "\n\n-------- Print MicroK8s dashboard token... --------\n"
+#- echo "\n\n-------- Print MicroK8s dashboard token... --------\n"
 
-- microk8s kubectl describe secret -n kube-system microk8s-dashboard-token
+#- microk8s kubectl describe secret -n kube-system microk8s-dashboard-token
 
 # List Pods
 - echo "\n\n-------- Listing Pods... --------\n"
