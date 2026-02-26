@@ -23,9 +23,8 @@ To use these launchers, your host machine must meet the following requirements:
 
 1.  OS: Ubuntu (made and tested in 24.04)
 2.  Resources: Not all labs require high amounts of RAM & CPU, but they were made for a 64 GB and 22 CPU workstation.
-3.  LXD: Installed and initialised using the provided preseed (static IP is assumed)
-4.  For non-nested deployments: Static IP is required, matching the LXD preseed IP
-5.  Dependencies: `lxd` and `jq` (Required for parsing JSON output in the launch scripts)
+3.  LXD: Installed and initialised using the provided preseed (necessary network bridges and profiles)
+4.  Dependencies: `lxd` and `jq` (Required for parsing JSON output in the launch scripts)
 
 ```bash
 sudo apt update
@@ -55,6 +54,38 @@ ssh_authorized_keys: [ssh-ed25519 AAAAC3....]
 ```
 > You must replace `pgdg99` with your own Launchpad username. The block `ssh_authorized_keys` block is a redundant SSH auth method in case the connection with Launchpad fails; replace with your own public key.
 
+#### Host's LXD Certificate Generation & Authorisation
+Non-nested virtualisation labs use the host's LXD as their VM host. This means you need to create an X.509 certificate, add it to the LXD trusted list, and then inject the `.crt` and `.key` files content into the non-nested lab Cloud-Inits.
+
+1. Generate an X.509 certificate and key pair, save these:
+```bash
+openssl req -x509 -newkey rsa:4096 -keyout maas-client.key -out maas-client.crt -nodes -days 3650 -subj "/CN=maas-client"
+```
+
+2. On your host machine, add to the LXD's trusted list the generated certificate:
+```bash
+lxc config trust add maas-client.crt --name maas-client
+```
+
+3. Copy the `.crt` and `.key` contents into the non-nested cloud-inits:
+```yaml
+- path: /root/lxd-host.crt
+  owner: root:root
+  permissions: '0644'
+  content: |
+    -----BEGIN CERTIFICATE-----
+    [PASTE CERTIFICATE CONTENT HERE]
+    -----END CERTIFICATE-----
+
+- path: /root/lxd-host.key
+  owner: root:root
+  permissions: '0600'
+  content: |
+    -----BEGIN PRIVATE KEY-----
+    [PASTE PRIVATE KEY CONTENT HERE]
+    -----END PRIVATE KEY-----
+```
+
 #### Snapcraft Credentials
 The Snapcraft lab automates the login process by injecting a credentials file. Inside `Snapcraft/cloud-init/cloud-config.yaml`, you will find a large encoded block:
 
@@ -79,10 +110,10 @@ The Landscape Client lab automates the Ubuntu Pro attach. Inside `Landscape/clou
 Critical Step: Before running any labs, you must initialise LXD with the specific network and profile configurations required by these scripts.
 
 A preseed file is provided in the `LXD/` folder. This configures:
-* LXD listening on static IP '`192.168.1.68:8443`', this can be changed to '`[::]:8443`', but the static IP is required for non-nested deployments.
-* lxdbr0: 10.10.10.1/24 (NAT enabled)
-* mbr0: 10.0.0.1/22 (No DHCP, NAT enabled, used for non-nested MAAS/Infrastructure layers)
-* Storage: 500GiB ZFS pool named `default`. (Labs use much less, but some can use up to 250GB at a time)
+* LXD listening on `[::]:8443`.
+* lxdbr0: `10.10.10.1/24` (NAT enabled)
+* mbr0: `10.0.0.1/22` (No DHCP, NAT enabled, used for non-nested MAAS/Infrastructure layers)
+* Storage: `500 GiB` ZFS pool named `default`. (Labs use much less, but some can use up to `250 GiB` at a time)
 * Profiles: A custom `default` profile with standard tools (neovim, git) and a `maas` profile with specific network attachments.
 
 To initialise LXD:
@@ -95,7 +126,7 @@ cd LXD
 cat lxd_preseed.yaml | sudo lxd init --preseed
 ```
 
-> Note: If you already have LXD configured, check `LXD/preseed.yaml` to manually add the `mbr0` network and the `maas` profile, as the scripts rely on these specific names. Configure LXD to listen to `192.168.1.68:8443` and set it as a static IP, or replace the power address IPs in each cloud-init when adding LXD as a MAAS VM Host.
+> Note: If you already have LXD configured, check `LXD/preseed.yaml` to manually add the `mbr0` network and the `maas` profile, as the scripts rely on these specific names. Configure LXD to listen to `[::]:8443`, or replace the power address IPs in each cloud-init when adding LXD as a MAAS VM Host.
 
 ---
 
@@ -139,7 +170,7 @@ Example:
 
 ### 3. Cleaning Up
 
-The cleanup process depends on whether you are running a standard Nested lab or a Non-nested lab.
+The cleanup process depends on whether you are running a standard Nested lab or a non-nested lab.
 
 ![Nested vs Non-Nested Topology](MAAS/nested-vs-non-nested.png)
 
@@ -248,7 +279,7 @@ Automatically sets up a Landscape client and connects it to a Landscape Server.
 
 * Resources: 2 vCPUs, 6GB RAM.
 
-> You must add the Landscape Sever IP inside the cloud-init for it to work. (`LANDSCAPE_SERVER_IP=<ip>`)
+> You must add the Landscape Server IP inside the cloud-init for it to work. (`LANDSCAPE_SERVER_IP=<ip>`)
 
 ### -  Micro K8s (--micro)
 A lightweight single-node version of Kubernetes designed for local development and testing.
