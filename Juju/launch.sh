@@ -50,9 +50,9 @@ if [ "$SNAP" = true ] && [ "$NO_NEST" = true ]; then
     if [ "$CUSTOM_NAME_SET" = false ]; then
         VM_NAME="juju-maas-snap"
     fi
-    CPU_LIMIT="2"
-    RAM_LIMIT="6GiB"
-    DISK_LIMIT="20GiB"
+    CPU_LIMIT="3"
+    RAM_LIMIT="8GiB"
+    DISK_LIMIT="30GiB"
     PROFILE="maas"
 
 elif [ "$SNAP" = true ]; then
@@ -67,9 +67,9 @@ elif [ "$NO_NEST" = true ]; then
     echo -e "${BYELLOW}-> Switch enabled: Using non nested LXD cloud-init config. ${NC}"
     echo ""
     CLOUD_INIT="$CLOUD_INIT_NN"
-    CPU_LIMIT="2"
-    RAM_LIMIT="6GiB"
-    DISK_LIMIT="20GiB"
+    CPU_LIMIT="3"
+    RAM_LIMIT="8GiB"
+    DISK_LIMIT="30GiB"
     PROFILE="maas"
 fi
 

@@ -1,6 +1,6 @@
 #cloud-config
 ssh_import_id: ['lp:pgdg99']
-ssh_authorized_keys: [ssh-ed25519 AAAAC3...]
+ssh_authorized_keys: [ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJarMH7ITZbBSf6iA8RzneJfgDQt3H9pDs1lm+RjmAXq pablo.degreiff@canonical.com]
 ssh_genkeytypes: [ed25519]
 
 write_files:

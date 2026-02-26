@@ -1,6 +1,5 @@
 config:
-  core.https_address: '192.168.1.68:8443'
-  core.trust_password: password
+  core.https_address: '[::]:8443'
 networks:
 - config:
     ipv4.address: 10.10.10.1/24
@@ -31,7 +30,7 @@ profiles:
     cloud-init.user-data: |+
       #cloud-config
       ssh_import_id: ['lp:pgdg99']
-      ssh_authorized_keys: [ssh-ed25519 AAAAC3...]
+      ssh_authorized_keys: [ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJarMH7ITZbBSf6iA8RzneJfgDQt3H9pDs1lm+RjmAXq pablo.degreiff@canonical.com]
       ssh_genkeytypes: [ed25519]
 
       write_files:
@@ -75,7 +74,7 @@ profiles:
       type: disk
   name: default
 - config: 
-    cloud-init.network-config: |+
+    cloud-init.network-config: |
       network:
         version: 2
         ethernets:

@@ -1,6 +1,6 @@
 #cloud-config
 ssh_import_id: ['lp:pgdg99']
-ssh_authorized_keys: [ssh-ed25519 AAAAC3...]
+ssh_authorized_keys: [ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJarMH7ITZbBSf6iA8RzneJfgDQt3H9pDs1lm+RjmAXq pablo.degreiff@canonical.com]
 ssh_genkeytypes: [ed25519]
 
 write_files:
@@ -113,8 +113,8 @@ runcmd:
 - export OS_RESERVED_IP_START=10.10.20.100
 - export OS_RESERVED_IP_END=10.10.20.199
 
-- export JUJU_CONTROLLER_CPU=3
-- export JUJU_CONTROLLER_RAM=8192
+- export JUJU_CONTROLLER_CPU=4
+- export JUJU_CONTROLLER_RAM=10240
 - export JUJU_CONTROLLER_DISK=20
 
 - export NODE_CPU=3
@@ -285,7 +285,7 @@ runcmd:
 - maas $ADMIN_USER vm-hosts create type=lxd power_address=https://${IP_ADDRESS}:8444 password=password name=LXD project=$MAAS_PROJECT_NAME
 - export VM_HOST_ID=$(maas $ADMIN_USER vm-hosts read | jq -r '.[0].id')
 
-# Compose VMs using VM host (-c limits.cpu=15 -c limits.memory=40GiB --device root,size=220GiB)
+# Compose VMs using VM host (-c limits.cpu=16 -c limits.memory=42GiB --device root,size=220GiB)
 - echo "\n\n-------- Composing VM(s) using LXD... --------\n"
 
 - export SYSTEM_ID_1=$(maas $ADMIN_USER vm-host compose $VM_HOST_ID cores=$JUJU_CONTROLLER_CPU memory=$JUJU_CONTROLLER_RAM storage=$JUJU_CONTROLLER_DISK hostname=controller | jq -r '.system_id') && echo $SYSTEM_ID_1
@@ -921,7 +921,7 @@ runcmd:
   #!/bin/bash
 
   # Source openrc and print env variables
-  echo "\n\n-------- Source openrc... --------\n"
+  echo -e "\n\n-------- Source openrc... --------\n"
 
   source ~/openrc
   env | grep OS_
@@ -930,23 +930,23 @@ runcmd:
   openstack endpoint list --interface admin
 
   # ------------------------------------------- Download image and set Flavor -------------------------------------------
-  echo "\n\n-------- Download Jammy image... --------\n"
+  echo -e "\n\n-------- Download Jammy image... --------\n"
 
   mkdir ~/cloud-images
   wget -nv http://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img -O ~/cloud-images/jammy-amd64.img
 
   # Import image into Glance
-  echo "\n\n-------- Import Jammy image into Glance... --------\n"
+  echo -e "\n\n-------- Import Jammy image into Glance... --------\n"
 
   openstack image create --public --container-format bare --disk-format qcow2 --file ~/cloud-images/jammy-amd64.img jammy-amd64
 
   # Create a flavor
-  echo "\n\n-------- Create a Flavor... --------\n"
+  echo -e "\n\n-------- Create a Flavor... --------\n"
 
   openstack flavor create --ram $FLAVOR_RAM --disk $FLAVOR_DISK --ephemeral $FLAVOR_E_DISK m1
 
   # --------------------------------------------- Set up public networking ---------------------------------------------
-  echo "\n\n-------- Set up public networking... --------\n"
+  echo -e "\n\n-------- Set up public networking... --------\n"
 
   # Create an external public (shared) network called ‘ext_net’
   openstack network create --external --share --provider-network-type flat --provider-physical-network physnet1 ext_net

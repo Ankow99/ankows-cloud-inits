@@ -59,9 +59,9 @@ if [ "$JUJU_MODE" = true ] && [ "$NO_NEST" = true ]; then
     echo -e "${BYELLOW}-> Switch enabled: Using non nested LXD cloud-init config. ${NC}"
     echo ""
     CLOUD_INIT="$CLOUD_INIT_SNAP_NN"
-    CPU_LIMIT="2"
-    RAM_LIMIT="6GiB"
-    DISK_LIMIT="20GiB"
+    CPU_LIMIT="3"
+    RAM_LIMIT="8GiB"
+    DISK_LIMIT="30GiB"
     PROFILE="maas"
 
 elif [ "$MICRO_MODE" = true ]; then
@@ -83,7 +83,7 @@ elif [ "$THW_MODE" = true ]; then
         VM_NAME="thw-k8s"
     fi
     CPU_LIMIT="8"
-    RAM_LIMIT="16GiB"
+    RAM_LIMIT="18GiB"
     DISK_LIMIT="80GiB"
 fi
 
@@ -384,38 +384,38 @@ else
         echo "MicroK8s Service's CIDR: $SERVICES_CIDR"
 
         # 6. Obtain MicroK8s Dashboard Pod IP
-        echo ""
-        echo -e "${BYELLOW}-> 6. Obtaining MicroK8s Dashboard Pod IP... ${NC}"
-        echo ""
+        #echo ""
+        #echo -e "${BYELLOW}-> 6. Obtaining MicroK8s Dashboard Pod IP... ${NC}"
+        #echo ""
 
-        DASHBOARD_IP=$(lxc exec $VM_NAME -- microk8s kubectl get service kubernetes-dashboard -n kube-system -o json | jq -r .spec.clusterIP)
+        #DASHBOARD_IP=$(lxc exec $VM_NAME -- microk8s kubectl get service kubernetes-dashboard -n kube-system -o json | jq -r .spec.clusterIP)
 
-        echo "MicroK8s Dashboard Pod IP: $DASHBOARD_IP"
+        #echo "MicroK8s Dashboard Pod IP: $DASHBOARD_IP"
         
-        # 7. Set ip route for MicroK8s Pod's CIDR
+        # 6. Set ip route for MicroK8s Pod's CIDR
         echo ""
-        echo -e "${BYELLOW}-> 7. Setting IP route for MicroK8s Pods's CIDR... ${NC}"
+        echo -e "${BYELLOW}-> 6. Setting IP route for MicroK8s Pods's CIDR... ${NC}"
         echo ""
 
         sudo ip r add $PODS_CIDR via $IP || true
 
-        # 8. Set ip route for MicroK8s Service's CIDR
+        # 7. Set ip route for MicroK8s Service's CIDR
         echo ""
-        echo -e "${BYELLOW}-> 8. Setting IP route for MicroK8s Service's CIDR... ${NC}"
+        echo -e "${BYELLOW}-> 7. Setting IP route for MicroK8s Service's CIDR... ${NC}"
         echo ""
 
         sudo ip r add $SERVICES_CIDR via $IP || true
 
         # 9. Open MicroK8s dashboard in browser
-        echo ""
-        echo -e "${BYELLOW}-> 9. Opening MicroK8s Dashboard... ${NC}"
+        #echo ""
+        #echo -e "${BYELLOW}-> 9. Opening MicroK8s Dashboard... ${NC}"
 
         # Open Browser
-        if command -v xdg-open &> /dev/null; then
-            xdg-open "https://$DASHBOARD_IP:443" > /dev/null 2>&1 &
-        fi
+        #if command -v xdg-open &> /dev/null; then
+        #    xdg-open "https://$DASHBOARD_IP:443" > /dev/null 2>&1 &
+        #fi
 
-        # 10. Generate Cleanup Script
+        # 8. Generate Cleanup Script
         CLEANUP_SCRIPT="$SCRIPT_DIR/destroy-${VM_NAME}.sh"
 
         cat << EOF > "$CLEANUP_SCRIPT"
@@ -444,11 +444,11 @@ EOF
         
         chmod +x "$CLEANUP_SCRIPT"
         echo ""
-        echo -e "${BYELLOW}-> 10. Cleanup script created: $CLEANUP_SCRIPT ${NC}"
+        echo -e "${BYELLOW}-> 8. Cleanup script created: $CLEANUP_SCRIPT ${NC}"
         
-        # 11. Final Interactive Shell
+        # 9. Final Interactive Shell
         echo ""
-        echo -e "${BYELLOW}-> 11. Dropping into interactive shell... ${NC}"
+        echo -e "${BYELLOW}-> 9. Dropping into interactive shell... ${NC}"
         echo ""
         ssh -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$IP"
     fi

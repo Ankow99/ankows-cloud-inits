@@ -1,6 +1,6 @@
 #cloud-config
 ssh_import_id: ['lp:pgdg99']
-ssh_authorized_keys: [ssh-ed25519 AAAAC3...]
+ssh_authorized_keys: [ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJarMH7ITZbBSf6iA8RzneJfgDQt3H9pDs1lm+RjmAXq pablo.degreiff@canonical.com]
 ssh_genkeytypes: [ed25519]
 
 write_files:
@@ -42,7 +42,6 @@ lxd:
   preseed: |
     config:
       core.https_address: '[::]:8444'
-      core.trust_password: password
     storage_pools:
     - config:
         size: 160GB
@@ -106,6 +105,8 @@ runcmd:
 
 - export GATEWAY=10.10.20.1
 - export SUBNET=10.10.20.0/24
+- export LXD_CERT="/root/lxd-local.crt"
+- export LXD_KEY="/root/lxd-local.key"
 
 - export MAAS_PROJECT_NAME=$(hostname)
 - export MAAS_DNS=8.8.8.8
@@ -257,10 +258,20 @@ runcmd:
     sleep 30
   done
 
+# Generate trust certificate for LXD
+- echo "\n\n-------- Generating trust certificate for LXD... --------\n"
+
+- openssl req -x509 -newkey rsa:2048 -keyout $LXD_KEY -out $LXD_CERT -nodes -days 3650 -subj "/CN=lxd-local"
+
+# Trusting generated certificate in LXD
+- echo "\n\n-------- Trusting generated certificate in LXD... --------\n"
+
+- lxc config trust add $LXD_CERT --name lxd-local
+
 # Add LXD as a VM host for MAAS
 - echo "\n\n-------- Adding LXD as VM host in MAAS... --------\n"
 
-- maas $ADMIN_USER vm-hosts create type=lxd power_address=https://${IP_ADDRESS}:8444 password=password name=LXD project=$MAAS_PROJECT_NAME
+- maas $ADMIN_USER vm-hosts create type=lxd power_address=https://${IP_ADDRESS}:8444 certificate="$(cat $LXD_CERT)" key="$(cat $LXD_KEY)" name=LXD project=$MAAS_PROJECT_NAME
 - export VM_HOST_ID=$(maas $ADMIN_USER vm-hosts read | jq -r '.[0].id')
 
 # Compose VMs using VM host (-c limits.cpu=13 -c limits.memory=36GiB --device root,size=150GiB)
@@ -429,7 +440,7 @@ runcmd:
 
 - chown ubuntu:ubuntu /home/ubuntu/postgresql.yaml
 
-- su ubuntu -c 'juju deploy -n 3 --channel $POSTGRESQL_VERSION --to lxd:0,lxd:1,lxd:2 --constraints mem=2048 --config ~/postgresql.yaml postgresql'
+- su ubuntu -c 'juju deploy -n 3 --channel $POSTGRESQL_VERSION --to 0,1,2 --constraints mem=2048 --config ~/postgresql.yaml postgresql'
 
 - rm /home/ubuntu/postgresql.yaml
 

@@ -1,6 +1,6 @@
 #cloud-config
 ssh_import_id: ['lp:pgdg99']
-ssh_authorized_keys: [ssh-ed25519 AAAAC3...]
+ssh_authorized_keys: [ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJarMH7ITZbBSf6iA8RzneJfgDQt3H9pDs1lm+RjmAXq pablo.degreiff@canonical.com]
 ssh_genkeytypes: [ed25519]
 
 write_files:
@@ -51,7 +51,7 @@ runcmd:
 - export COMPUTER_TITLE=client
 
 - export LANDSCAPE_SERVER_FQDN=server.landscape.com
-- export LANDSCAPE_SERVER_IP=<ip> # Set this up before launching
+- export LANDSCAPE_SERVER_IP=10.10.10.## # Set this up before launching
 
 - export IP_ADDRESS=$(hostname -I | awk '{print $1}')
 - export FQDN=$(hostname -f)
@@ -68,7 +68,7 @@ runcmd:
 - echo -n | openssl s_client -connect $LANDSCAPE_SERVER_FQDN:443 | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' | tee /etc/landscape/server.pem
 
 # Attach Ubuntu Pro Token
-- pro attach <pro-token> # Your own Ubuntu Pro Token
+- pro attach C12NUyK6MQUgNMLZjR4CDW5KX334gx # Your own Ubuntu Pro Token
 
 # Configure Landscape client
 - echo "\n\n-------- Configure Landscape Client... --------\n"
