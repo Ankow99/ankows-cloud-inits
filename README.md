@@ -55,7 +55,7 @@ ssh_authorized_keys: [ssh-ed25519 AAAAC3....]
 > You must replace `pgdg99` with your own Launchpad username. The block `ssh_authorized_keys` block is a redundant SSH auth method in case the connection with Launchpad fails; replace with your own public key.
 
 #### Host's LXD Certificate Generation & Authorisation
-Non-nested virtualisation labs use the host's LXD as their VM host. This means you need to create an X.509 certificate, add it to the LXD trusted list, and then inject the `.crt` and `.key` files content into the non-nested lab Cloud-Inits.
+Non-nested virtualisation labs use the host's LXD as their VM host. This means you need to create an X.509 certificate, add it to the LXD trusted list, and then inject the `.crt` and `.key` files' content into the non-nested lab Cloud-Inits. Alternatively, you can also use the provided ones located in `/MAAS/auth/`, which are already injected; you just need to add them to your host's LXD trust list.
 
 1. Generate an X.509 certificate and key pair, save these:
 ```bash
@@ -93,6 +93,7 @@ The Snapcraft lab automates the login process by injecting a credentials file. I
 - |
   cat <<EOF > /home/ubuntu/snapcraft-credentials
   [INSERT YOUR CREDENTIALS HERE]
+  EOF
 ```
 > You must replace `[INSERT YOUR CREDENTIALS HERE]` with your own Snapcraft credentials. You can see how to generate them [here](https://documentation.ubuntu.com/snapcraft/stable/how-to/publishing/authenticate/).
 
