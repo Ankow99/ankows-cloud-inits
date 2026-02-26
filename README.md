@@ -256,10 +256,10 @@ A production-grade, highly available systems management server.
 ---
 
 #### The Juju Status Watcher
-When running these heavy labs, the `launch.sh` script enters an Interactive Watch Mode:
+When running these heavy labs, the `launch.sh` script enters a juju status + cloud-init output watch mode:
 
 1.  Phase 1 (Log Tail): It tails standard cloud-init logs while MAAS and the Juju Controller are bootstrapping.
-2.  Phase 2 (Juju Watch): Once the Juju model is initialised, the script automatically switches views. It clears the screen and displays a live-refreshing `juju status --color` dashboard.
+2.  Phase 2 (Juju Watch): Once the Juju model is initialised, the script automatically switches views. It clears the screen and displays a live-refreshing `juju status --color` + cloud-init logs dashboard.
     * This allows you to watch the topology (HAProxy, DBs, RabbitMQ, Nova, etc.) turn "Green" (Active/Idle) in real-time.
 3.  Completion: Once all units are active, it opens the dashboards (Horizon/Landscape + MAAS) and drops you into the shell.
 
@@ -267,7 +267,7 @@ When running these heavy labs, the `launch.sh` script enters an Interactive Watc
 
 ## Lightweight Labs: Landscape Server, Landscape Client & Micro K8s
 
-These labs may require additional configuration to work.
+These labs do not make use of the MAAS + Juju infrastructure that the rest of the labs use.
 
 ### -  Landscape Server
 A standalone deb Landscape server installation (on-prem).
@@ -301,11 +301,11 @@ The Snapcraft lab is a dedicated build environment.
 
 Running OpenStack:
 ```bash
-# Full Non-Nested Charmed OpenStack (Heavy)
+# Full non-nested charmed OpenStack (Heavy)
 cd OpenStack
 ./launch.sh --nn
 
-# Full Charmed OpenStack (Heavy - Worse)
+# Full charmed OpenStack (Heavy - Worse)
 cd OpenStack
 ./launch.sh
 
@@ -315,17 +315,17 @@ cd OpenStack
 
 Running Landscape:
 ```bash
-# Standalone Server (Lightweight - installs via Apt)
+# Standalone server (Lightweight - installs via Apt)
 cd Landscape
 ./launch.sh
 
-# High Availability Cluster (Heavy - installs via Juju)
+# High availability cluster (Heavy - installs via Juju)
 ./launch.sh --ha
 
-# Non-Nested High Availability Cluster (Heavy - installs via Juju)
+# Non-nested high availability cluster (Heavy - installs via Juju)
 ./launch.sh --nn
 
-# Client Simulation (Connects to the server above)
+# Client simulation (Connects to the server above)
 ./launch.sh --client
 ```
 
@@ -345,7 +345,7 @@ cd Landscape
 │   │   ├── cloud-config.yaml           # Juju with deb MAAS (Default)
 │   │   ├── cloud-config-nn.yaml        # Non-nested Juju with deb MAAS --nn
 │   │   ├── cloud-config-snap.yaml      # Juju with snap MAAS --snap
-│   │   └── cloud-config-snap-nn.yaml   # Non-nested Juju with snap MAAS --nn + --snap (Currently not working)
+│   │   └── cloud-config-snap-nn.yaml   # Non-nested Juju with snap MAAS --nn + --snap
 │   └── launch.sh
 ├── Kubernetes/
 │   ├── cloud-init/
@@ -357,7 +357,7 @@ cd Landscape
 ├── Landscape/
 │   ├── cloud-init/
 │   │   ├── cloud-config-server.yaml    # Standalone deb install (Default)
-│   │   ├── cloud-config-ha.yaml        # HA Charmed Landscape --ha
+│   │   ├── cloud-config-ha.yaml        # HA charmed Landscape --ha
 │   │   ├── cloud-config-ha-nn.yaml     # Non-nested HA charmed Landscape --nn
 │   │   └── cloud-config-client.yaml    # Landscape client --client
 │   └── launch.sh
@@ -366,7 +366,7 @@ cd Landscape
 │   │   ├── cloud-config.yaml           # Deb MAAS (Default)
 │   │   ├── cloud-config-nn.yaml        # Non-nested deb MAAS --nn
 │   │   ├── cloud-config-snap.yaml      # Snap MAAS --snap
-│   │   └── cloud-config-snap-nn.yaml   # Non-nested snap MAAS --nn + --snap (Currently not working)
+│   │   └── cloud-config-snap-nn.yaml   # Non-nested snap MAAS --nn + --snap
 │   └── launch.sh
 ├── OpenStack/
 │   ├── cloud-init/
