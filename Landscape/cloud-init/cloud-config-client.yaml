@@ -68,7 +68,7 @@ runcmd:
 - echo -n | openssl s_client -connect $LANDSCAPE_SERVER_FQDN:443 | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' | tee /etc/landscape/server.pem
 
 # Attach Ubuntu Pro Token
-- pro attach C12NUyK6MQUgNMLZjR4CDW5KX334gx # Your own Ubuntu Pro Token
+- pro attach <pro-token> # Your own Ubuntu Pro Token
 
 # Configure Landscape client
 - echo "\n\n-------- Configure Landscape Client... --------\n"
