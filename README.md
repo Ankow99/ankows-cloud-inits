@@ -363,6 +363,9 @@ cd Landscape
 │   │   └── cloud-config-client.yaml    # Landscape client --client
 │   └── launch.sh
 ├── MAAS/
+│   ├── auth/
+│   │   ├── maas-client.crt             # Pre-injected .crt
+│   │   └── maas-client.key             # Pre-injected .key
 │   ├── cloud-init/
 │   │   ├── cloud-config.yaml           # Deb MAAS (Default)
 │   │   ├── cloud-config-nn.yaml        # Non-nested deb MAAS --nn
