@@ -1,0 +1,1124 @@
+## template: jinja
+#cloud-config
+
+# ==========================================
+# DEFAULT JINJA CONFIGURATIONS
+# ==========================================
+
+# --- Auth & System ---
+{% set custom_ssh_key = "" %}
+{% set custom_ssh_import_id = "" %}
+{% set custom_user = "ubuntu" %}
+{% set custom_password = "ubuntu" %}
+{% set custom_pro_token = "" %}
+{% set custom_hostname = "" %}
+{% set custom_tld = "sunbeam" %}
+{% set custom_timezone = "America/New_York" %}
+
+# --- Snap Channels ---
+{% set custom_maas_snap = True %}
+{% set custom_lxd_channel = "5.21/stable" %}
+{% set custom_maas_channel = "3.7/stable" %}
+{% set custom_sunbeam_channel = "2024.1/stable" %}
+
+# --- LXD Settings ---
+{% set custom_lxd_project = "sunlxd" %}
+{% set custom_lxd_bridge = "mbr0" %}
+{% set custom_lxd_pool = "default" %}
+
+# --- MAAS Networking ---
+{% set custom_maas_user = "admin" %}
+{% set custom_maas_password = "admin" %}
+{% set custom_maas_email = "admin@mail.com" %}
+{% set custom_maas_gateway = "10.0.0.1" %}
+{% set custom_maas_subnet = "10.0.0.0/22" %}
+{% set custom_maas_dns = "8.8.8.8" %}
+{% set custom_maas_ip_start = "10.0.3.200" %}
+{% set custom_maas_ip_end = "10.0.3.254" %}
+{% set custom_maas_images = "noble jammy" %}
+{% set custom_maas_db_name = "maas_db" %}
+{% set custom_maas_space = "sunspace" %}
+
+# --- OpenStack Networking ---
+{% set custom_os_deployment = "sunbeam" %}
+{% set custom_os_int_api_start = "10.0.3.100" %}
+{% set custom_os_int_api_end = "10.0.3.199" %}
+{% set custom_os_pub_api_start = "10.0.3.0" %}
+{% set custom_os_pub_api_end = "10.0.3.99" %}
+{% set custom_os_neutron_cidr = "10.10.10.0/24" %}
+{% set custom_os_neutron_bridge = "lxdbr0" %}
+
+# --- Hardware Allocation ---
+# Nodes: ( CPU = 24 | RAM = 52GiB | DISK = 280GiB ) (per node)
+# MAAS:  ( CPU = 4  | RAM = 8GiB  | DISK = 30GiB  ) <-- if nested
+
+# HA Settings
+{% set custom_ha_nodes = 3 %}
+{% set custom_az_names = "AZ1 AZ2 AZ3" %}
+{% set custom_osds_per_node = 4 %}
+
+# Juju Controller Defaults per node
+{% set custom_juju_cpu = "6" %}
+{% set custom_juju_ram = "10GiB" %}
+{% set custom_juju_disk = "30GiB" %}
+
+# Sunbeam Controller Defaults per node
+{% set custom_sunbeam_cpu = "6" %}
+{% set custom_sunbeam_ram = "10GiB" %}
+{% set custom_sunbeam_disk = "30GiB" %}
+
+# Cloud Node Defaults per node
+{% set custom_cloud_cpu = "16" %}
+{% set custom_cloud_ram = "32GiB" %}
+{% set custom_cloud_disk = "100GiB" %}
+{% set custom_cloud_osd_disk = "30GiB" %}
+
+# --- Architecture Toggle ---
+{% set custom_nested_lxd = True %}
+
+# ==========================================
+# NESTED OVERRIDES (Used only if nested_lxd = True)
+# ==========================================
+{% set custom_nested_maas_gateway = "10.20.0.1" %}
+{% set custom_nested_maas_subnet = "10.20.0.0/22" %}
+{% set custom_nested_maas_ip_start = "10.20.3.200" %}
+{% set custom_nested_maas_ip_end = "10.20.3.254" %}
+
+{% set custom_nested_os_pub_api_start = "10.20.3.0" %}
+{% set custom_nested_os_pub_api_end = "10.20.3.99" %}
+{% set custom_nested_os_int_api_start = "10.20.3.100" %}
+{% set custom_nested_os_int_api_end = "10.20.3.199" %}
+{% set custom_nested_os_neutron_cidr = "10.30.0.0/22" %}
+
+# ==========================================
+# DATASOURCE PARSER (LXD vs Cloud)
+# ==========================================
+
+{% if cloud_name == "lxd" %}
+  {% set meta = {} %}
+  {% for key, value in ds.config.items() %}
+    {% if key.startswith("user_") %}
+      {% set _ = meta.__setitem__(key[5:], value) %}
+    {% endif %}
+  {% endfor %}
+{% else %}
+  {% set meta = ds.meta_data.get("meta") if ds.meta_data.get("meta") else {} %}
+{% endif %}
+
+# ==========================================
+# VARIABLE BINDINGS
+# ==========================================
+
+{% set ssh_key = meta.get("ssh_key") or custom_ssh_key %}
+{% set ssh_import_id = meta.get("ssh_import_id") or custom_ssh_import_id %}
+{% set user = meta.get("user") or custom_user %}
+{% set password = meta.get("password") or custom_password %}
+{% set pro_token = meta.get("pro_token") or custom_pro_token %}
+{% set hostname_base = meta.get("hostname") or custom_hostname %}
+{% set tld = meta.get("tld") or custom_tld %}
+{% set timezone = meta.get("timezone") or custom_timezone %}
+
+{% set lxd_channel = meta.get("lxd_channel") or custom_lxd_channel %}
+{% set maas_channel = meta.get("maas_channel") or custom_maas_channel %}
+{% set sunbeam_channel = meta.get("sunbeam_channel") or custom_sunbeam_channel %}
+
+{% set lxd_project = meta.get("lxd_project") or custom_lxd_project %}
+{% set lxd_bridge = meta.get("lxd_bridge") or custom_lxd_bridge %}
+{% set lxd_pool = meta.get("lxd_pool") or custom_lxd_pool %}
+
+{% set maas_user = meta.get("maas_user") or custom_maas_user %}
+{% set maas_password = meta.get("maas_password") or custom_maas_password %}
+{% set maas_email = meta.get("maas_email") or custom_maas_email %}
+{% set maas_gateway = meta.get("maas_gateway") or custom_maas_gateway %}
+{% set maas_subnet = meta.get("maas_subnet") or custom_maas_subnet %}
+{% set maas_dns = meta.get("maas_dns") or custom_maas_dns %}
+{% set maas_ip_start = meta.get("maas_ip_start") or custom_maas_ip_start %}
+{% set maas_ip_end = meta.get("maas_ip_end") or custom_maas_ip_end %}
+{% set maas_images = meta.get("maas_images") or custom_maas_images %}
+{% set maas_db_name = meta.get("maas_db_name") or custom_maas_db_name %}
+{% set maas_space = meta.get("maas_space") or custom_maas_space %}
+
+{% set os_deployment = meta.get("os_deployment") or custom_os_deployment %}
+{% set os_pub_api_start = meta.get("os_pub_api_start") or custom_os_pub_api_start %}
+{% set os_pub_api_end = meta.get("os_pub_api_end") or custom_os_pub_api_end %}
+{% set os_int_api_start = meta.get("os_int_api_start") or custom_os_int_api_start %}
+{% set os_int_api_end = meta.get("os_int_api_end") or custom_os_int_api_end %}
+{% set os_neutron_cidr = meta.get("os_neutron_cidr") or custom_os_neutron_cidr %}
+{% set os_neutron_bridge = meta.get("os_neutron_bridge") or custom_os_neutron_bridge %}
+
+{% set ha_nodes = meta.get("ha_nodes") | default(custom_ha_nodes, true) | int %}
+{% set az_names = meta.get("az_names") or custom_az_names %}
+{% set osds_per_node = meta.get("osds_per_node") | default(custom_osds_per_node, true) | int %}
+
+{% set juju_cpu = meta.get("juju_cpu") or custom_juju_cpu %}
+{% set juju_ram = meta.get("juju_ram") or custom_juju_ram %}
+{% set juju_disk = meta.get("juju_disk") or custom_juju_disk %}
+
+{% set sunbeam_cpu = meta.get("sunbeam_cpu") or custom_sunbeam_cpu %}
+{% set sunbeam_ram = meta.get("sunbeam_ram") or custom_sunbeam_ram %}
+{% set sunbeam_disk = meta.get("sunbeam_disk") or custom_sunbeam_disk %}
+
+{% set cloud_cpu = meta.get("cloud_cpu") or custom_cloud_cpu %}
+{% set cloud_ram = meta.get("cloud_ram") or custom_cloud_ram %}
+{% set cloud_disk = meta.get("cloud_disk") or custom_cloud_disk %}
+{% set cloud_osd_disk = meta.get("cloud_osd_disk") or custom_cloud_osd_disk %}
+
+{% if meta.get("maas_snap") is not none %}
+  {% set maas_snap = (meta.get("maas_snap") | string | lower == "true") %}
+{% else %}
+  {% set maas_snap = (custom_maas_snap | string | lower == "true") %}
+{% endif %}
+
+{% if meta.get("nested_lxd") is not none %}
+  {% set nested_lxd = (meta.get("nested_lxd") | string | lower == "true") %}
+{% else %}
+  {% set nested_lxd = (custom_nested_lxd | string | lower == "true") %}
+{% endif %}
+
+# --- Nested overrides variable switcher ---
+{% if nested_lxd %}
+  {% set maas_gateway = meta.get("maas_gateway") or custom_nested_maas_gateway %}
+  {% set maas_subnet = meta.get("maas_subnet") or custom_nested_maas_subnet %}
+  {% set maas_ip_start = meta.get("maas_ip_start") or custom_nested_maas_ip_start %}
+  {% set maas_ip_end = meta.get("maas_ip_end") or custom_nested_maas_ip_end %}
+  
+  {% set os_pub_api_start = meta.get("os_pub_api_start") or custom_nested_os_pub_api_start %}
+  {% set os_pub_api_end = meta.get("os_pub_api_end") or custom_nested_os_pub_api_end %}
+  {% set os_int_api_start = meta.get("os_int_api_start") or custom_nested_os_int_api_start %}
+  {% set os_int_api_end = meta.get("os_int_api_end") or custom_nested_os_int_api_end %}
+  {% set os_neutron_cidr = meta.get("os_neutron_cidr") or custom_nested_os_neutron_cidr %}
+{% else %}
+  {% set maas_gateway = meta.get("maas_gateway") or custom_maas_gateway %}
+  {% set maas_subnet = meta.get("maas_subnet") or custom_maas_subnet %}
+  {% set maas_ip_start = meta.get("maas_ip_start") or custom_maas_ip_start %}
+  {% set maas_ip_end = meta.get("maas_ip_end") or custom_maas_ip_end %}
+  
+  {% set os_pub_api_start = meta.get("os_pub_api_start") or custom_os_pub_api_start %}
+  {% set os_pub_api_end = meta.get("os_pub_api_end") or custom_os_pub_api_end %}
+  {% set os_int_api_start = meta.get("os_int_api_start") or custom_os_int_api_start %}
+  {% set os_int_api_end = meta.get("os_int_api_end") or custom_os_int_api_end %}
+  {% set os_neutron_cidr = meta.get("os_neutron_cidr") or custom_os_neutron_cidr %}
+{% endif %}
+
+# --- Neutron CIDR fix ---
+{% set _cidr_parts = os_neutron_cidr.split('/') %}
+{% set _ip_octets = _cidr_parts[0].split('.') %}
+{% set os_neutron_gateway_ip = _ip_octets[0] ~ '.' ~ _ip_octets[1] ~ '.' ~ _ip_octets[2] ~ '.1' %}
+{% set os_neutron_prefix = _cidr_parts[1] %}
+
+# ==========================================
+# DYNAMIC NODE GENERATOR
+# ==========================================
+
+{% set hostnames_list = [] %}
+{% set cpus_list = [] %}
+{% set rams_list = [] %}
+{% set disks_list = [] %}
+
+# 1. Generate Juju Controllers
+{% for i in range(1, ha_nodes + 1) %}
+  {% set _ = hostnames_list.append("juju-controller-" ~ i) %}
+  {% set _ = cpus_list.append(juju_cpu) %}
+  {% set _ = rams_list.append(juju_ram) %}
+  {% set _ = disks_list.append(juju_disk) %}
+{% endfor %}
+
+# 2. Generate Sunbeam Controllers
+{% for i in range(1, ha_nodes + 1) %}
+  {% set _ = hostnames_list.append("sunbeam-controller-" ~ i) %}
+  {% set _ = cpus_list.append(sunbeam_cpu) %}
+  {% set _ = rams_list.append(sunbeam_ram) %}
+  {% set _ = disks_list.append(sunbeam_disk) %}
+{% endfor %}
+
+# 3. Generate Cloud Nodes
+{% for i in range(1, ha_nodes + 1) %}
+  {% set _ = hostnames_list.append("cloud-" ~ i) %}
+  {% set _ = cpus_list.append(cloud_cpu) %}
+  {% set _ = rams_list.append(cloud_ram) %}
+  {% set _ = disks_list.append(cloud_disk) %}
+{% endfor %}
+
+# Compile final strings
+{% set nodes_hostnames = hostnames_list | join(" ") %}
+{% set nodes_cpus = cpus_list | join(" ") %}
+{% set nodes_rams = rams_list | join(" ") %}
+{% set nodes_disks = disks_list | join(" ") %}
+
+# --- Dynamic Nested Storage Calculation ---
+{% set ns = namespace(total_storage=0) %}
+{% for disk in nodes_disks.split(' ') %}
+  {% set disk_val = disk | replace('GiB', '') | replace('GB', '') | int %}
+  {% set ns.total_storage = ns.total_storage + disk_val %}
+{% endfor %}
+
+# Add the specific Cloud OSD disk(s) and a 10GB buffer
+{% set _cloud_osd_size = cloud_osd_disk | replace('GiB', '') | replace('GB', '') | int %}
+{% set total_osd_storage = _cloud_osd_size * osds_per_node * ha_nodes %}
+{% set final_total = ns.total_storage + total_osd_storage + 10 %}
+{% set nested_storage = final_total | string ~ 'GiB' %}
+
+# ==========================================
+# STANDARD CLOUD-INIT EXECUTION
+# ==========================================
+
+# Create Hostname / FQDN
+{% set base_name = local_hostname if hostname_base == "" else hostname_base %}
+{% if tld %}
+fqdn: {{ base_name }}.{{ tld }}
+prefer_fqdn_over_hostname: true
+{% else %}
+hostname: {{ base_name }}
+{% endif %}
+
+# Create user and config auth
+users:
+  - name: {{ user }}
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: adm, sys, lxd, sudo
+    shell: /bin/bash
+{% if not ssh_key and not ssh_import_id %}
+    plain_text_passwd: "{{ password }}"
+    lock_passwd: false
+{% endif %}
+{% if ssh_key %}
+    ssh_authorized_keys:
+      - {{ ssh_key }}
+{% endif %}
+{% if ssh_import_id %}
+    ssh_import_id:
+      - {{ ssh_import_id }}
+{% endif %}
+
+# Enable SSH Password Auth ONLY if no keys are provided
+{% if not ssh_key and not ssh_import_id %}
+ssh_pwauth: true
+{% else %}
+ssh_pwauth: false
+{% endif %}
+
+# Config Ubuntu Pro
+{% if pro_token %}
+ubuntu_pro:
+  token: {{ pro_token }}
+{% endif %}
+
+{% if nested_lxd %}
+# If Nested: Seed the LXD database natively via cloud-init
+lxd:
+  preseed: |
+    config:
+      core.https_address: '[::]:8444'
+    networks:
+    - config:
+        ipv4.address: {{ maas_gateway }}/{{ maas_subnet.split('/')[1] }}
+        ipv4.dhcp: "false"
+        ipv4.nat: "true"
+        ipv6.address: none
+      description: "Non-DHCP NAT bridge for MAAS"
+      name: {{ lxd_bridge }}
+      type: bridge
+      project: default
+    - config:
+        ipv4.address: {{ os_neutron_gateway_ip }}/{{ os_neutron_prefix }}
+        ipv4.dhcp: "true"
+        ipv4.nat: "true"
+        ipv6.address: none
+      description: "Neutron managed bridge"
+      name: {{ os_neutron_bridge }}
+      type: bridge
+      project: default
+    storage_pools:
+    - config:
+        size: {{ nested_storage }}
+      description: "Nested ZFS Storage"
+      name: default
+      driver: zfs 
+    profiles:
+    - config:
+        limits.cpu: "2"
+        limits.memory: 6GiB
+      description: "Default LXD profile"
+      devices:
+        eth0:
+          name: eth0
+          network: {{ lxd_bridge }}
+          type: nic
+        root:
+          path: /
+          pool: default
+          type: disk
+      name: default
+    projects: []
+    cluster: null
+{% endif %}
+
+write_files:
+- path: /etc/profile.d/maas-login.sh
+  permissions: '0644'
+  content: |
+    if [ "$USER" = "{{ user }}" ]; then
+        ADMIN_USER="{{ maas_user }}"
+        if command -v maas >/dev/null 2>&1 && sudo maas apikey --username $ADMIN_USER >/dev/null 2>&1; then
+            maas login $ADMIN_USER 'http://localhost:5240/MAAS/' $(sudo maas apikey --username $ADMIN_USER) >/dev/null 2>&1
+        fi
+
+        if command -v lxc >/dev/null 2>&1; then
+            {% if not nested_lxd %}
+            lxc remote switch host-lxd >/dev/null 2>&1 || true
+            {% endif %}
+            {% if lxd_project != "default" %}
+            lxc project switch {{ lxd_project }} >/dev/null 2>&1 || true
+            {% endif %}
+        fi
+
+        if [ -f "/home/{{ user }}/sunrc" ]; then
+            source /home/{{ user }}/sunrc
+        fi
+    fi
+
+- path: /etc/profile.d/default-editor.sh
+  permissions: '0644'
+  content: |
+    export EDITOR=nvim
+
+- path: /etc/sudoers.d/keep-editor
+  permissions: '0440'
+  content: |
+    Defaults env_keep += "EDITOR"
+
+{% if not nested_lxd %}
+# Non-Nested specific files (Host's LXD Certificates)
+- path: /root/snap/lxd/common/config/client.crt
+  owner: root:root
+  permissions: '0644'
+  content: |
+    -----BEGIN CERTIFICATE-----
+    MIIDDTCCAfWgAwIBAgIURgCXtVx/njtlqmDW6dyRcUhT9iwwDQYJKoZIhvcNAQEL
+    BQAwFjEUMBIGA1UEAwwLbWFhcy1jbGllbnQwHhcNMjYwMjI1MjM1MTI2WhcNMzYw
+    MjIzMjM1MTI2WjAWMRQwEgYDVQQDDAttYWFzLWNsaWVudDCCASIwDQYJKoZIhvcN
+    AQEBBQADggEPADCCAQoCggEBALXbitp5VQBdbRTkesn+syBmJi33tt8zlTJl/bdg
+    GGiGrW4b2+8kHwdD0JoWZHsAynuJ9p325FRUwasscb5Sd7bXPGEJ+yg0ES4UIQpN
+    SflbymlrFulO+VzfNHN8vAW2GEhNXqYugv8PODVdBzmGp/VAapNR39RAQ4mZmTPj
+    6C0FSdO8bzm5PM+jLJFz+fHawgTYJTq24+MkHpKXO3OrGRtpex1D/ae4b91lIg5/
+    KiSnUO/Ifw2JdEMItieRS/S5RTOk1Xyw0kBqJ3cpuBkvGL1ydGrZub3+tyUrKDaa
+    sCsidmwbLXc+KMs7Yi1gSeONBRSbPnWfgi0hppu/Yak81v8CAwEAAaNTMFEwHQYD
+    VR0OBBYEFBwzc8H0C1+C6wjJgg3vXRw48ucnMB8GA1UdIwQYMBaAFBwzc8H0C1+C
+    6wjJgg3vXRw48ucnMA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZIhvcNAQELBQADggEB
+    AJeMqdSPe1Nly0UxNOCBzxXrJ6J24wC2xhqLkYdOABFkmRNM5djBSPWXeKaTfl2z
+    s5CHbgxT5po5aD2TjXLY7sbhMND4SIuictcwzrOerLpvaiUbEk01dd1k3oH+dzQ3
+    tTh3A5a+AMr1eOPB4eyVpfmvz9HJSruhuQAjNaxnslQ1I5da1+Lf4JkBCpYIoP+D
+    5nCeDEy9++eDUTZZ7TTh2btavAJd1LHmobN5oxnnXYAVdLeobX6rSRf2H2lQnh99
+    CEWpAa152lIutFwd+WJ5OeKSOaW5/COHBeyE6umbgW+lNtJyKFI2SF5nkGXeXboT
+    8+TpWRRINhv9jQKxT13W+3Y=
+    -----END CERTIFICATE-----
+
+- path: /root/snap/lxd/common/config/client.key
+  owner: root:root
+  permissions: '0600'
+  content: |
+    -----BEGIN PRIVATE KEY-----
+    MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC124raeVUAXW0U
+    5HrJ/rMgZiYt97bfM5UyZf23YBhohq1uG9vvJB8HQ9CaFmR7AMp7ifad9uRUVMGr
+    LHG+Une21zxhCfsoNBEuFCEKTUn5W8ppaxbpTvlc3zRzfLwFthhITV6mLoL/Dzg1
+    XQc5hqf1QGqTUd/UQEOJmZkz4+gtBUnTvG85uTzPoyyRc/nx2sIE2CU6tuPjJB6S
+    lztzqxkbaXsdQ/2nuG/dZSIOfyokp1DvyH8NiXRDCLYnkUv0uUUzpNV8sNJAaid3
+    KbgZLxi9cnRq2bm9/rclKyg2mrArInZsGy13PijLO2ItYEnjjQUUmz51n4ItIaab
+    v2GpPNb/AgMBAAECggEABJeptwCvY9X4Jjnq2+UBswTBXBHQXWyZDO/Ea3gSxbj4
+    8jnj4PMhkXZl8y4zlWOcuWfvgWe1tmd5iJATw0Gj4ksnLDArVoWSFX7Oosr23kQy
+    JV1d88BZzb2ZPn1c5iwGCvVhOYMdLcG9oqNZxlsfLLNWvaeoplyFGBl34/aSa2iW
+    4eL8dPkm+ZI8JPrvy6HNZS+WRJXexk9fhoQzhHpdn/gS+yULrjl7pDtejIbBDuhL
+    rTNfrGxyhMtWCr6NzknZy52zJoPzoC88TK+jz0R3Kf6jIeXKWdNRMdlViOMomerE
+    l+Y8H1nN2UrbRZlN91QGggo0ZmpjJ4oizzJxTGyhQQKBgQDX4TIs9luVsl5PXtuA
+    evhS9kxnm3Tk0z7wVDNxVdtZiYT+yWpTFSabmPInfRHeeoP6IfwuWs56Vb3FVgGt
+    vmxsjdHftIKyQPdgv0lyuMp9vvVij9cpKXMEnRBC6plqtbyeyNPQ1GLf4L8QEaM5
+    4DSoF/NNNEPRvOtTrxbZlh/YnwKBgQDXp7GmWWQoUTW/xk4bVEw7jJ11g2S+iA+W
+    04vY3GYVhZCAKSdYFbcg4SQf3N2BPLj7T0KDJ/YS8rqloVzMBchswvuF6bsE6ERz
+    gtRIo6MvaxtKYvz1LvhvrtlAN1MteJbMPiSOC0dgkUd8k1+zkc8vWG1nfd88cAM5
+    gUT+bXWFoQKBgQCEEfN+amFxXaQw7plfKtwM9T2dDRAghdQ1d23ZYmtFhcpljZeM
+    qJ3sB0/uNKff8hgXyP7c5RT45seomIuCXcM7TjAdqfNjVjeBasVmeAL5lv/Mgq9h
+    MUh6hBRUu+2LyQ9SHQ7o7WZoDLkW/ZNcbvwH8k8Y5mavQ+K8WZujFiL5hQKBgHHi
+    Q+V2FXdZE4pXvc2e4bcc1dZF8gDQN3NN+e8mzN4Wr62OjhFtPk0lt/7/kxX5rDJC
+    s/wxMTjmZ/ypzyiK8UHGYi9gs/uucN+TOmm1yKp05G+PAMi16kqISoAn90vu/6uS
+    MZm1iRcNAXRfG03n9UKqbvQVO7td58YJZxb5VPOhAoGAJp8m5rTj28mzTgSgdKs3
+    ffxbv3tCS5iyP0phkh8ny8MmkxOEDsISJIFk3tDH+sbCRny2AP5qrEoUJ31JQsuT
+    IlZKVYAs4ubvchO2UDzDKiM0EYHqYP9+q40SBVAuCidPZ1KEtbjYSsfvoRSK4NnQ
+    NrkLfc1kndRN0qVzYMb7iNk=
+    -----END PRIVATE KEY-----
+{% endif %}
+
+packages:
+  - git
+  - neovim
+  - pollinate
+  - jq
+
+{% if not maas_snap %}
+apt:
+  sources:
+    maas:
+      source: 'ppa:maas/{{ maas_channel.split('/')[0] }}'
+{% endif %}
+
+snap:
+  commands:
+  - snap install lxd --channel={{ lxd_channel }}
+{% if maas_snap %}
+  - snap install maas --channel={{ maas_channel }}
+{% endif %}
+  - snap install openstack --channel={{ sunbeam_channel }}
+
+package_update: true
+package_upgrade: true
+package_reboot_if_required: true
+
+timezone: {{ timezone }}
+
+random_seed:
+  command: [pollinate]
+  command_required: true
+  file: /dev/urandom
+
+runcmd:
+
+{% if not maas_snap %}
+
+# Install MAAS (not using apt module or else bind conflicts with LXD)
+- echo "\n\n-------- Installing deb MAAS... --------\n"
+
+- apt-get update
+- apt-get install -y maas
+
+{% endif %}
+
+# Verify critical dependencies
+- echo "\n\n-------- Verifying dependencies... --------\n"
+- |
+  for cmd in lxc jq maas sunbeam; do
+    if ! command -v $cmd >/dev/null 2>&1; then
+      echo "CRITICAL ERROR: Required command '$cmd' not found."
+      echo "Snap/apt package installation likely failed due to a network error."
+      exit 1
+    fi
+  done
+  echo "All dependencies verified successfully!"
+
+# Export variables
+- echo "\n\n-------- Exporting variables... --------\n"
+
+# --- Networking ---
+- export IP_ADDRESS=$(hostname -I | awk '{print $1}')
+- export INTERFACE=$(ip -j route show default | jq -r '.[].dev')
+
+# --- Auth & System ---
+- export SSH_KEY="{{ ssh_import_id }}"
+- export ADMIN_USER="{{ maas_user }}"
+- export ADMIN_PASS="{{ maas_password }}"
+- export ADMIN_EMAIL="{{ maas_email }}"
+- export RUN_AS="sudo -u {{ user }}"
+- export RUN_AS_LOGIN="sudo -i -u {{ user }}"
+
+# --- LXD Settings ---
+- export LXD_PROJECT="{{ lxd_project }}"
+- export LXD_BRIDGE="{{ lxd_bridge }}"
+{% if nested_lxd %}
+- export LXD_ADDR="${IP_ADDRESS}:8444"
+- export LXD_POOL="default"
+- export LXD_CERT="/root/lxd-local.crt"
+- export LXD_KEY="/root/lxd-local.key"
+{% else %}
+- export LXD_ADDR="{{ maas_gateway }}:8443"
+- export LXD_POOL="{{ lxd_pool }}"
+- export LXD_CERT="/root/snap/lxd/common/config/client.crt"
+- export LXD_KEY="/root/snap/lxd/common/config/client.key"
+{% endif %}
+
+# --- MAAS Networking ---
+- export MAAS_DOMAIN_NAME="{{ tld if tld else 'maas' }}"
+- export MAAS_GATEWAY="{{ maas_gateway }}"
+- export MAAS_SUBNET="{{ maas_subnet }}"
+- export MAAS_DNS="{{ maas_dns }}"
+- export MAAS_RESERVED_IP_START="{{ maas_ip_start }}"
+- export MAAS_RESERVED_IP_END="{{ maas_ip_end }}"
+- export MAAS_IMAGES="{{ maas_images }}"
+- export MAAS_DB_NAME="{{ maas_db_name }}"
+- export MAAS_SPACE="{{ maas_space }}"
+
+# --- OpenStack Networking ---
+- export OS_DEPLOYMENT_NAME="{{ os_deployment }}"
+- export OS_PUBLIC_API_IP_START="{{ os_pub_api_start }}"
+- export OS_PUBLIC_API_IP_END="{{ os_pub_api_end }}"
+- export OS_INTERNAL_API_IP_START="{{ os_int_api_start }}"
+- export OS_INTERNAL_API_IP_END="{{ os_int_api_end }}"
+- export OS_NEUTRON_BRIDGE="{{ os_neutron_bridge }}"
+- export OS_NEUTRON_CIDR="{{ os_neutron_cidr }}"
+
+# --- Hardware Allocation ---
+- export NODES_HOSTNAMES="{{ nodes_hostnames }}"
+- export NODES_CPUS="{{ nodes_cpus }}"
+- export NODES_RAMS="{{ nodes_rams }}"
+- export NODES_DISKS="{{ nodes_disks }}"
+
+- export HA_NODES="{{ ha_nodes }}"
+- export AZ_NAMES="{{ az_names }}"
+- export CLOUD_OSD_DISK="{{ cloud_osd_disk }}"
+- export OSDS_PER_NODE="{{ osds_per_node }}"
+
+{% if maas_snap %}
+
+# Install PostgreSQL
+- echo "\n\n-------- Install PostgreSQL... --------\n"
+
+- systemctl disable --now systemd-timesyncd
+- apt-get update
+- apt-get install -y postgresql
+
+# Configure PostgreSQL
+- echo "\n\n-------- Configure PostgreSQL... --------\n"
+
+- sudo -i -u postgres psql -c "CREATE USER \"$ADMIN_USER\" WITH ENCRYPTED PASSWORD '$ADMIN_PASS'"
+- sudo -i -u postgres createdb -O "$ADMIN_USER" "$MAAS_DB_NAME"
+- sed -i "1i host    $MAAS_DB_NAME    $ADMIN_USER    0/0     md5" /etc/postgresql/*/main/pg_hba.conf
+
+# Initialise snap MAAS
+- echo "\n\n-------- Initializing snap MAAS... --------\n"
+
+- maas init region+rack --database-uri "postgres://$ADMIN_USER:$ADMIN_PASS@$HOSTNAME/$MAAS_DB_NAME" --maas-url http://${IP_ADDRESS}:5240/MAAS
+- maas createadmin --username $ADMIN_USER --password $ADMIN_PASS --email $ADMIN_EMAIL {% if ssh_import_id %}--ssh-import $SSH_KEY{% endif %}
+
+{% else %}
+
+# Initialise deb MAAS
+- echo "\n\n-------- Initializing deb MAAS... --------\n"
+
+- maas init --admin-username $ADMIN_USER --admin-password $ADMIN_PASS --admin-email $ADMIN_EMAIL {% if ssh_import_id %}--admin-ssh-import $SSH_KEY{% endif %} --rbac-url "" --candid-agent-file ""
+
+{% endif %}
+
+# Wait for MAAS services to be ready
+- |
+  echo "\n\n-------- Waiting for MAAS API to be ready... --------\n"
+  
+  sleep 30
+  until maas login $ADMIN_USER 'http://localhost:5240/MAAS/' $(maas apikey --username $ADMIN_USER) > /dev/null 2>&1; do
+    echo "MAAS is not ready yet (502). Retrying in 30 seconds..."
+    sleep 30
+  done
+
+# Grab API key and login as admin
+- echo "\n\n-------- Logging in as '$ADMIN_USER' user... --------\n"
+
+- export APIKEY=$(maas apikey --username $ADMIN_USER)
+- maas login $ADMIN_USER 'http://localhost:5240/MAAS/' $APIKEY
+
+- maas $ADMIN_USER maas set-config name=maas_name value=$LXD_PROJECT name=completed_intro value=true
+
+# Automatically create and add ssh keys to MAAS
+- echo "\n\n-------- Generating SSH keys and adding them to MAAS... --------\n"
+
+- ssh-keygen -q -t rsa -N "" -f "/home/{{ user }}/.ssh/id_rsa"
+- chown {{ user }}:{{ user }} /home/{{ user }}/.ssh/id_rsa /home/{{ user }}/.ssh/id_rsa.pub
+- chmod 600 /home/{{ user }}/.ssh/id_rsa
+- chmod 644 /home/{{ user }}/.ssh/id_rsa.pub
+- maas $ADMIN_USER sshkeys create key="$(cat /home/{{ user }}/.ssh/id_rsa.pub)"
+
+# Configure MAAS networking (set gateways, vlans, DHCP on etc)
+- echo "\n\n-------- Configuring MAAS networking... --------\n"
+
+- export FABRIC_ID=$(maas $ADMIN_USER subnet read "$MAAS_SUBNET" | jq -r ".vlan.fabric_id")
+- export VLAN_TAG=$(maas $ADMIN_USER subnet read "$MAAS_SUBNET" | jq -r ".vlan.vid")
+- export PRIMARY_RACK=$(maas $ADMIN_USER rack-controllers read | jq -r ".[] | .system_id")
+
+- maas $ADMIN_USER subnet update $MAAS_SUBNET gateway_ip=$MAAS_GATEWAY
+- maas $ADMIN_USER ipranges create type=dynamic start_ip=$MAAS_RESERVED_IP_START end_ip=$MAAS_RESERVED_IP_END
+- maas $ADMIN_USER ipranges create type=reserved start_ip=$OS_INTERNAL_API_IP_START end_ip=$OS_INTERNAL_API_IP_END comment="${OS_DEPLOYMENT_NAME}-internal-api"
+- maas $ADMIN_USER ipranges create type=reserved start_ip=$OS_PUBLIC_API_IP_START end_ip=$OS_PUBLIC_API_IP_END comment="${OS_DEPLOYMENT_NAME}-public-api"
+- maas $ADMIN_USER vlan update $FABRIC_ID $VLAN_TAG dhcp_on=true primary_rack=$PRIMARY_RACK
+- maas $ADMIN_USER maas set-config name=upstream_dns value=$MAAS_DNS
+
+# Set the MAAS domain name
+- |
+  echo "\n\n-------- Configuring MAAS domain '$MAAS_DOMAIN_NAME'... --------\n"
+  
+  # Check if MAAS auto-created the domain during initialization
+  EXISTING_DOMAIN_ID=$(maas $ADMIN_USER domains read | jq -r '.[] | select(.name=="'$MAAS_DOMAIN_NAME'") | .id')
+  
+  if [ -n "$EXISTING_DOMAIN_ID" ] && [ "$EXISTING_DOMAIN_ID" != "null" ]; then
+    echo "Domain '$MAAS_DOMAIN_NAME' already exists! Setting as default and authoritative..."
+    export MAAS_DOMAIN_NAME_ID=$EXISTING_DOMAIN_ID
+    maas $ADMIN_USER domain update $MAAS_DOMAIN_NAME_ID authoritative=true
+    maas $ADMIN_USER domain set-default $MAAS_DOMAIN_NAME_ID
+  else
+    echo "Domain not found. Renaming default domain to '$MAAS_DOMAIN_NAME'..."
+    export MAAS_DOMAIN_NAME_ID=$(maas $ADMIN_USER domains read | jq -r '.[] | select(.is_default==true) | .id')
+    maas $ADMIN_USER domain update $MAAS_DOMAIN_NAME_ID name=$MAAS_DOMAIN_NAME authoritative=true
+  fi
+  
+  # Update the rack controller to use the correct domain
+  maas $ADMIN_USER rack-controller update $PRIMARY_RACK domain=$MAAS_DOMAIN_NAME
+
+# Add MAAS DNS to host
+- |
+  cat <<EOF > /etc/netplan/99-maas-dns.yaml
+  network:
+    version: 2
+    ethernets:
+      $INTERFACE:
+        nameservers:
+          addresses: [$IP_ADDRESS]
+          search: [$MAAS_DOMAIN_NAME, maas]
+  EOF
+
+- chmod 600 /etc/netplan/99-maas-dns.yaml
+- netplan apply
+
+# Configure boot images
+- echo "\n\n-------- Configuring MAAS boot images... --------\n"
+
+- export BOOT_SOURCE_ID=$(maas $ADMIN_USER boot-sources read | jq -r '.[0].id')
+- |
+  for RELEASE in $MAAS_IMAGES; do
+    maas $ADMIN_USER boot-source-selections create $BOOT_SOURCE_ID os="ubuntu" release="$RELEASE" arches="amd64" labels='*' subarches='*'
+  done
+- maas $ADMIN_USER boot-resources import
+
+# Wait for MAAS boot images to be ready
+- |
+  echo "\n\n-------- Waiting for all MAAS boot images to sync... --------\n"
+  
+  while true; do
+    missing_images=false
+    
+    importing_status=$(maas $ADMIN_USER boot-resources is-importing)
+    requested_releases=$(maas $ADMIN_USER boot-source-selections read $BOOT_SOURCE_ID | jq -r '.[].release')
+    downloaded_releases=$(maas $ADMIN_USER boot-resources read | jq -r '.[].name' | sort | uniq)
+    
+    # Check if the image has been downloaded
+    for release in $requested_releases; do
+      if echo "$downloaded_releases" | grep -q "$release"; then
+         # Image exists. Now check if import is finished
+         if [ "$importing_status" = "false" ]; then
+             echo "  Image '$release' has downloaded!"
+         else
+             echo "  Image '$release' is currently syncing..."
+             missing_images=true
+         fi
+      else
+         echo "  Image '$release' was not found in boot resources..."
+         missing_images=true
+      fi
+    done
+    
+    # Check for missing images
+    if [ "$missing_images" = "false" ]; then
+      clean_list=$(echo "$requested_releases" | tr '\n' ' ')
+      echo "All selected boot images ( $clean_list) are fully synced!"
+      break
+    fi
+    
+    echo "Some images are missing. Waiting 30s..."
+    sleep 30
+  done
+
+{% if nested_lxd %}
+
+# Generate local LXD trust certificate
+- echo "\n\n-------- Generating trust certificate for local LXD... --------\n"
+
+- openssl req -x509 -newkey rsa:2048 -keyout $LXD_KEY -out $LXD_CERT -nodes -days 3650 -subj "/CN=lxd-local"
+- lxc config trust add $LXD_CERT --name lxd-local
+
+# Provide certs to user context
+- $RUN_AS mkdir -p /home/{{ user }}/snap/lxd/common/config
+- cp $LXD_CERT /home/{{ user }}/snap/lxd/common/config/client.crt
+- cp $LXD_KEY /home/{{ user }}/snap/lxd/common/config/client.key
+- chown -R {{ user }}:{{ user }} /home/{{ user }}/snap/lxd/common/config
+
+{% else %}
+
+# Setup external LXD client certificates and remote connection
+- echo "\n\n-------- Configuring remote LXD connection... --------\n"
+
+- lxc remote add host-lxd https://$LXD_ADDR --accept-certificate
+- lxc remote switch host-lxd
+
+# Provide certs to user context
+- $RUN_AS mkdir -p /home/{{ user }}/snap/lxd/common/config
+- cp $LXD_CERT /home/{{ user }}/snap/lxd/common/config/client.crt
+- cp $LXD_KEY /home/{{ user }}/snap/lxd/common/config/client.key
+- chown -R {{ user }}:{{ user }} /home/{{ user }}/snap/lxd/common/config
+- $RUN_AS lxc remote add host-lxd https://$LXD_ADDR --accept-certificate
+
+{% endif %}
+
+
+{% if lxd_project != "default" %}
+
+# Create LXD MAAS project
+- echo "\n\n-------- Creating LXD '$LXD_PROJECT' project... --------\n"
+
+- lxc project create $LXD_PROJECT
+- lxc project switch $LXD_PROJECT
+
+# Configure LXD MAAS project default profile
+- echo "\n\n-------- Configuring '$LXD_PROJECT' project's default profile... --------\n"
+- |
+  cat <<EOF | lxc profile edit default
+  config:
+    limits.cpu: "2"
+    limits.memory: 6GiB
+  description: MAAS Profile - Uses $LXD_BRIDGE as the network device
+  devices:
+    eth0:
+      name: eth0
+      network: $LXD_BRIDGE
+      type: nic
+    root:
+      path: /
+      pool: $LXD_POOL
+      size: 20GiB
+      type: disk
+  name: default
+  EOF
+
+{% else %}
+
+# Using default LXD project
+- echo "\n\n-------- Using '$LXD_PROJECT' LXD project... --------\n"
+
+- lxc project switch default
+
+{% endif %}
+
+# Create VMs directly via LXD
+- echo "\n\n-------- Creating empty VMs in LXD... --------\n"
+- |
+  i=1
+  for HOST in $NODES_HOSTNAMES; do
+    CPU=$(echo "$NODES_CPUS" | cut -d' ' -f$i)
+    RAM=$(echo "$NODES_RAMS" | cut -d' ' -f$i)
+    DISK=$(echo "$NODES_DISKS" | cut -d' ' -f$i)
+    
+    lxc init "$HOST" --vm --empty -c limits.cpu="$CPU" -c limits.memory="$RAM" -d root,size="$DISK"
+    
+    i=$((i + 1))
+  done
+
+# Attach specific extra devices to the cloud nodes
+- |
+  for HOST in $NODES_HOSTNAMES; do
+    case "$HOST" in
+      cloud-*)
+        # Loop to create and attach multiple OSD disks
+        for i in $(seq 1 $OSDS_PER_NODE); do
+          lxc storage volume create $LXD_POOL ${HOST}-osd${i}-disk size=$CLOUD_OSD_DISK --type=block
+          lxc config device add $HOST osd${i} disk pool=$LXD_POOL source=${HOST}-osd${i}-disk
+        done
+        
+        # Attach Neutron networking
+        lxc config device add $HOST eth1 nic nictype=bridged parent="$OS_NEUTRON_BRIDGE"
+        ;;
+    esac
+  done
+
+# Start VMs to trigger PXE Boot & Enlistment
+- echo "\n\n-------- Starting VMs for MAAS enlistment... --------\n"
+- |
+  for HOST in $NODES_HOSTNAMES; do
+    lxc start $HOST
+  done
+
+# Wait for VMs to enlist in MAAS via MAC
+- |
+  echo "\n\n-------- Waiting for all VMs to enlist in MAAS... --------\n"
+  
+  while true; do
+    all_enlisted=true
+    
+    for HOST in $NODES_HOSTNAMES; do
+      # Fetch the dynamic MAC to identify the machine in MAAS
+      MAC=$(lxc config get $HOST volatile.eth0.hwaddr)
+      SYSTEM_ID=$(maas $ADMIN_USER machines read mac_address=$MAC | jq -r '.[0].system_id')
+      status=$(maas $ADMIN_USER machines read mac_address=$MAC | jq -r '.[0].status_name')
+      
+      if [ "$SYSTEM_ID" != "null" ] && [ "$status" = "New" ]; then
+        echo "  [OK] '$HOST' was enlisted with ID '$SYSTEM_ID'!"
+      else
+        if [ "$status" = "null" ]; then
+           status="Waiting for PXE"
+        fi
+        echo "  [..] '$HOST' ($MAC) is currently '$status'..."
+        all_enlisted=false
+      fi
+    done
+    
+    # If the flag is still true, everyone is enlisted -> break the loop
+    if [ "$all_enlisted" = true ]; then
+      echo "All VMs have successfully enlisted!\n"
+      lxc list
+      break
+    fi
+    
+    echo "Waiting 30s before next check..."
+    sleep 30
+  done
+
+# Create Availability Zones in MAAS
+- |
+  echo "\n\n-------- Creating Availability Zones... --------\n"
+  for ZONE in $AZ_NAMES; do
+    if ! maas $ADMIN_USER zones read | jq -e ".[] | select(.name==\"$ZONE\")" > /dev/null; then
+      echo "Creating zone: $ZONE"
+      maas $ADMIN_USER zones create name="$ZONE"
+    else
+      echo "Zone $ZONE already exists."
+    fi
+  done
+
+# Find machines by MAC and set hostnames, domain, and explicit LXD power controls
+- |
+  echo "\n\n-------- Configuring hostnames and power controls... --------\n"
+  
+  LXD_CERT_CONTENT=$(cat $LXD_CERT)
+  LXD_KEY_CONTENT=$(cat $LXD_KEY)
+
+  NUM_AZS=$(echo "$AZ_NAMES" | awk '{print NF}')
+  
+  node_idx=0
+  for HOST in $NODES_HOSTNAMES; do
+    MAC=$(lxc config get $HOST volatile.eth0.hwaddr)
+    SYSTEM_ID=$(maas $ADMIN_USER machines read mac_address=$MAC | jq -r '.[0].system_id')
+
+    AZ_POS=$(( (node_idx % NUM_AZS) + 1 ))
+    TARGET_ZONE=$(echo "$AZ_NAMES" | cut -d' ' -f$AZ_POS)
+    
+    # Force the MAAS hostname, domain, and explicit LXD power controls
+    maas $ADMIN_USER machine update $SYSTEM_ID \
+      hostname=$HOST \
+      domain=$MAAS_DOMAIN_NAME_ID \
+      zone=$TARGET_ZONE \
+      power_type="lxd" \
+      power_parameters_power_address="https://$LXD_ADDR" \
+      power_parameters_certificate="$LXD_CERT_CONTENT" \
+      power_parameters_key="$LXD_KEY_CONTENT" \
+      power_parameters_instance_name="$HOST" \
+      power_parameters_project="$LXD_PROJECT"
+    
+    node_idx=$((node_idx + 1))
+  done
+
+# Commission machines
+- echo "\n\n-------- Commissioning machines... --------\n"
+- |
+  for HOST in $NODES_HOSTNAMES; do
+    SYSTEM_ID=$(maas $ADMIN_USER machines read hostname=$HOST | jq -r '.[0].system_id')
+    maas $ADMIN_USER machine commission $SYSTEM_ID
+  done
+
+# Wait for VMs to be ready
+- |
+  echo "\n\n-------- Waiting for VMs to enter 'Ready' state... --------\n"
+  
+  while true; do
+    all_ready=true
+    
+    for HOST in $NODES_HOSTNAMES; do
+      # Query MAAS for the status
+      status=$(maas $ADMIN_USER machines read hostname=$HOST | jq -r '.[0].status_name')
+      
+      if [ "$status" = "Ready" ]; then
+        echo "  [OK] '$HOST' is '$status'!"
+      else
+        echo "  [..] '$HOST' is currently '$status'..."
+        all_ready=false
+      fi
+    done
+    
+    # If the flag is still true, everyone is ready -> break the loop
+    if [ "$all_ready" = true ]; then
+      echo "All VMs are Ready!"
+      break
+    fi
+    
+    echo "Waiting 60s before checking again..."
+    sleep 60
+  done
+
+# Create tags and add them to commissioned machines
+- echo "\n\n-------- Creating and adding tags... --------\n"
+- |
+  maas $ADMIN_USER tags create name=openstack-${OS_DEPLOYMENT_NAME}
+  maas $ADMIN_USER tags create name=control
+  maas $ADMIN_USER tags create name=compute
+  maas $ADMIN_USER tags create name=storage
+  maas $ADMIN_USER tags create name=network
+  maas $ADMIN_USER tags create name=sunbeam
+  maas $ADMIN_USER tags create name=juju-controller
+
+  for HOST in $NODES_HOSTNAMES; do
+    SYSTEM_ID=$(maas $ADMIN_USER machines read hostname=$HOST | jq -r '.[0].system_id')
+
+    # Tag main disks as SSDs
+    echo "\n\n-------- Tagging main disks as SSDs... --------\n"
+    
+    MAIN_BLOCK_ID=$(maas $ADMIN_USER block-devices read $SYSTEM_ID | jq -r '.[] | select(.serial == "lxd_root" or .name == "sda" or .name == "vda") | .id' | head -n 1)
+    if [ -n "$MAIN_BLOCK_ID" ] && [ "$MAIN_BLOCK_ID" != "null" ]; then
+      maas $ADMIN_USER block-device add-tag $SYSTEM_ID $MAIN_BLOCK_ID tag=ssd
+      maas $ADMIN_USER block-device remove-tag $SYSTEM_ID $MAIN_BLOCK_ID tag=rotary
+      maas $ADMIN_USER block-device remove-tag $SYSTEM_ID $MAIN_BLOCK_ID tag=1rpm
+    fi
+    
+    # Base tag for all nodes
+    maas $ADMIN_USER tag update-nodes openstack-${OS_DEPLOYMENT_NAME} add=$SYSTEM_ID
+    
+    case "$HOST" in
+      juju-controller-*)
+        maas $ADMIN_USER tag update-nodes juju-controller add=$SYSTEM_ID
+        ;;
+        
+      sunbeam-controller-*)
+        maas $ADMIN_USER tag update-nodes sunbeam add=$SYSTEM_ID
+        ;;
+        
+      cloud-*)
+        maas $ADMIN_USER tag update-nodes control add=$SYSTEM_ID
+        maas $ADMIN_USER tag update-nodes compute add=$SYSTEM_ID
+        maas $ADMIN_USER tag update-nodes storage add=$SYSTEM_ID
+        maas $ADMIN_USER tag update-nodes network add=$SYSTEM_ID
+        
+        # Tag the ceph osd devices
+        echo "\n\n-------- Tagging ceph storage... --------\n"
+        
+        for i in $(seq 1 $OSDS_PER_NODE); do
+          OSD_BLOCK_ID=$(maas $ADMIN_USER block-devices read $SYSTEM_ID | jq -r '.[] | select(.serial == "lxd_osd'${i}'") | .id')
+          
+          if [ -n "$OSD_BLOCK_ID" ] && [ "$OSD_BLOCK_ID" != "null" ]; then
+            maas $ADMIN_USER block-device add-tag $SYSTEM_ID $OSD_BLOCK_ID tag=ceph
+            maas $ADMIN_USER block-device add-tag $SYSTEM_ID $OSD_BLOCK_ID tag=ssd
+            maas $ADMIN_USER block-device remove-tag $SYSTEM_ID $OSD_BLOCK_ID tag=rotary
+            maas $ADMIN_USER block-device remove-tag $SYSTEM_ID $OSD_BLOCK_ID tag=1rpm
+          fi
+        done
+        
+        # Tag the additional neutron interface
+        echo "\n\n-------- Tagging neutron interface... --------\n"
+        
+        CLOUD_NEUTRON_MAC=$(lxc config get $HOST volatile.eth1.hwaddr)
+        CLOUD_NEUTRON_INTERFACE_ID=$(maas $ADMIN_USER interfaces read $SYSTEM_ID | jq -r '.[] | select(.mac_address=="'$CLOUD_NEUTRON_MAC'") | .id')
+        if [ -n "$CLOUD_NEUTRON_INTERFACE_ID" ] && [ "$CLOUD_NEUTRON_INTERFACE_ID" != "null" ]; then
+          maas $ADMIN_USER interface update $SYSTEM_ID $CLOUD_NEUTRON_INTERFACE_ID tags=neutron:physnet1
+        fi
+        ;;
+    esac
+  done
+
+# Prepare machine for Sunbeam usage
+- echo "\n\n-------- Preparing machine for Sunbeam usage... --------\n"
+
+- $RUN_AS sunbeam prepare-node-script --client | $RUN_AS bash -x
+
+# Add the Canonical MAAS provider
+- echo "\n\n-------- Adding the Canonical MAAS provider... --------\n"
+
+- $RUN_AS sunbeam deployment add maas $OS_DEPLOYMENT_NAME $APIKEY http://${IP_ADDRESS}:5240/MAAS
+
+# Map network spaces to cloud networks
+- echo "\n\n-------- Mapping network spaces to cloud networks... --------\n"
+
+- maas $ADMIN_USER spaces create name=$MAAS_SPACE
+- maas $ADMIN_USER vlan update $FABRIC_ID $VLAN_TAG space=$MAAS_SPACE
+- $RUN_AS sunbeam deployment space map $MAAS_SPACE
+
+# Validate MAAS provider
+- echo "\n\n-------- Validating MAAS provider... --------\n"
+
+- $RUN_AS sunbeam deployment validate
+
+- cat /home/{{ user }}/snap/openstack/common/reports/*
+- echo "\n"
+- echo "Number of fails      - $(grep -c failed /home/{{ user }}/snap/openstack/common/reports/*)"
+- echo "Number of warnings   - $(grep -c warning /home/{{ user }}/snap/openstack/common/reports/*)"
+- echo "Number of successes  - $(grep -c success /home/{{ user }}/snap/openstack/common/reports/*)"
+- echo "\n"
+
+- $RUN_AS sunbeam deployment show $OS_DEPLOYMENT_NAME
+
+# Generate Sunbeam deployment manifest
+- echo "\n\n-------- Generating Sunbeam manifest... --------\n"
+- |
+  if [ "$HA_NODES" -gt "1" ]; then
+    TOPOLOGY="multi"
+  else
+    TOPOLOGY="single"
+  fi
+  
+  cat <<EOF > /home/{{ user }}/manifest.yaml
+  core:
+    config:
+      proxy:
+        proxy_required: false
+      database: $TOPOLOGY
+      region: RegionOne
+      user:
+        run_demo_setup: true
+        username: $ADMIN_USER
+        password: $ADMIN_PASS
+        cidr: 192.168.0.0/24
+        nameservers: $MAAS_DNS
+        security_group_rules: true
+        remote_access_location: local
+        physnet: physnet1
+      external-networks:
+        physnet1:
+          cidr: $OS_NEUTRON_CIDR
+          network_type: flat
+          nics:
+  EOF
+  
+  # Dynamically append all cloud nodes and their neutron interfaces
+  for HOST in $NODES_HOSTNAMES; do
+    case "$HOST" in
+      cloud-*)
+        echo "          $HOST: eth1" >> /home/{{ user }}/manifest.yaml
+        ;;
+    esac
+  done
+
+- chown {{ user }}:{{ user }} /home/{{ user }}/manifest.yaml
+- sleep 10
+
+# Bootstrap the orchestration layer
+- echo "\n\n-------- Bootstrapping the orchestration layer... --------\n"
+
+- $RUN_AS_LOGIN  script -q -e -c "sunbeam cluster bootstrap --accept-defaults --manifest /home/{{ user }}/manifest.yaml" /dev/null
+
+- echo "\n"
+- $RUN_AS juju switch controller
+- echo "\n"
+- $RUN_AS juju status
+- echo "\n"
+- $RUN_AS juju switch openstack-infra
+- echo "\n"
+- $RUN_AS juju status
+
+# Deploy the cloud
+- echo "\n\n-------- Deploying the cloud... --------\n"
+
+- $RUN_AS_LOGIN  script -q -e -c "sunbeam cluster deploy --accept-defaults --manifest /home/{{ user }}/manifest.yaml" /dev/null
+
+- echo "\n"
+- $RUN_AS juju switch openstack-machines
+- echo "\n"
+- $RUN_AS juju status
+- echo "\n"
+- $RUN_AS juju switch openstack
+- echo "\n"
+- $RUN_AS juju status
+
+# Configure the cloud
+- echo "\n\n-------- Configuring the cloud... --------\n"
+
+- $RUN_AS_LOGIN  script -q -e -c "sunbeam configure --accept-defaults --openrc /home/{{ user }}/sunrc --manifest /home/{{ user }}/manifest.yaml" /dev/null
+
+- echo "\n\n-------- Finished deploying Sunbeam, have fun!... --------\n"
+
