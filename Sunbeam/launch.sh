@@ -11,7 +11,7 @@ else
     SSH_ID=~/.ssh/id_ed25519 # Fallback default
 fi
 
-VM_NAME="sunbeam"
+VM_NAME="sunrepro"
 IMAGE="ubuntu:24.04"
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
@@ -27,9 +27,11 @@ ACCEPT_DEFAULTS=false
 # Array to hold dynamic LXD and Jinja flags
 LXC_OPTIONAL_ARGS=()
 
-# Generate the random bridges: 8 hex chars + specific suffix
-RANDOM_MAAS_BRIDGE="$(openssl rand -hex 4)_br0"
-RANDOM_NEU_BRIDGE="$(openssl rand -hex 4)_nbr0"
+# Generate the random bridges: specific prefix + 8 hex chars
+RANDOM_MAAS_BRIDGE="mbr-$(openssl rand -hex 4)"
+RANDOM_NEU_BRIDGE="nbr-$(openssl rand -hex 4)"
+
+MAX_WAIT=120 # Maximum wait time in minutes for loops
 
 # --- Colors ---
 # Check if stderr is a TTY
@@ -108,9 +110,18 @@ if [ ! -f "$CLOUD_INIT" ]; then
     exit 1
 fi
 
-# Check for jq
-if ! command -v jq &> /dev/null; then
-    echo -e "${BRED}Error: 'jq' is not installed. Please install it (sudo apt install jq). ${NC}"
+# Check for dependencies
+for cmd in jq openssl; do
+    if ! command -v "$cmd" &> /dev/null; then
+        echo -e "${BRED}Error: '$cmd' is not installed. Please install it.${NC}"
+        exit 1
+    fi
+done
+
+# Check VM name
+if [[ ! "$VM_NAME" =~ ^[a-z0-9][a-z0-9\-]*[a-z0-9]$ ]]; then
+    echo -e "${BRED}Error: Invalid VM name '$VM_NAME'.${NC}"
+    echo "LXD instance names must be lowercase alphanumeric and hyphens only (e.g., 'repro-sunbeam-1')."
     exit 1
 fi
 
@@ -131,15 +142,16 @@ fi
 
 # Define SSH options dynamically based on key existence
 if [ -f "$SSH_ID" ]; then
-    SSH_OPTS=(-i "$SSH_ID" -q -o "ConnectTimeout=5" -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null")
+    SSH_OPTS=(-i "$SSH_ID" -q -o "BatchMode=yes" -o "ConnectTimeout=5" -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null")
     SSH_INT_OPTS=(-i "$SSH_ID" -q -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null")
 else
-    SSH_OPTS=(-q -o "ConnectTimeout=5" -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null")
+    SSH_OPTS=(-q -o "BatchMode=yes" -o "ConnectTimeout=5" -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null")
     SSH_INT_OPTS=(-q -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null")
 fi
 
 extract_num() {
-    echo "$1" | sed -E 's/[^0-9]//g'
+    local val=$(echo "$1" | sed -E 's/[^0-9]//g')
+    echo "${val:-0}" # Safely fallback to 0 if empty
 }
 
 confirm_or_abort() {
@@ -160,20 +172,26 @@ confirm_or_abort() {
 }
 
 get_default() {
-    grep -E "^\s*\{\%\s*set\s+custom_$1\s*=" "$CLOUD_INIT" | sed -E 's/.*=\s*"?(.*?)"?\s*%\}.*/\1/'
+    grep -E "^\s*\{\%\s*set\s+custom_$1\s*=" "$CLOUD_INIT" | sed -E 's/.*=[[:space:]]*//; s/[[:space:]]*%\}.*//; s/^"//; s/"$//'
 }
 
-# Prompt Helper Function - ask_var "Prompt Text" "jinja_var_name" "bash_var_name"
+# Prompt Helper Function - ask_var "Prompt Text" "jinja_var_name" "bash_var_name" [dynamic_fallback]
 ask_var() {
     local prompt_text="$1"
     local config_key="$2"
     local var_name="$3"
+    local dynamic_fallback="$4"
     local default_val=""
     local user_input
 
     # Extract default from Jinja cloud-init template
     if [ -n "$config_key" ] && [ -f "$CLOUD_INIT" ]; then
         default_val=$(get_default "$config_key")
+    fi
+
+    # Apply dynamic fallback if Jinja template was empty
+    if [ -z "$default_val" ] && [ -n "$dynamic_fallback" ]; then
+        default_val="$dynamic_fallback"
     fi
 
     if [ "$ACCEPT_DEFAULTS" = true ]; then
@@ -212,7 +230,7 @@ if [ "$ACCEPT_DEFAULTS" = false ]; then
 fi
 ask_var "System User" "user" "SYS_USER"
 ask_var "System Password" "password" ""
-ask_var "Hostname (leave blank to use VM name)" "hostname" ""
+ask_var "Hostname" "hostname" "" "$VM_NAME"
 ask_var "Top Level Domain" "tld" "MAAS_DOMAIN"
 ask_var "Timezone" "timezone" ""
 
@@ -251,25 +269,25 @@ if [ "$NO_NEST" = true ]; then
         # Using random bridge, create it and obtain CIDR
         confirm_or_abort "    Create new random bridge '$LXD_BRIDGE' to auto-assign CIDR?"
         
-        echo "    Creating random managed non-DHCP + NAT MAAS bridge '$LXD_BRIDGE'...${NC}"
-        lxc network create "$LXD_BRIDGE" \
-          ipv4.nat=true \
-          ipv4.dhcp=false \
-          ipv6.address=none
+        echo "    Creating random managed non-DHCP + NAT MAAS bridge '$LXD_BRIDGE'..."
+        if ! lxc network create "$LXD_BRIDGE" ipv4.nat=true ipv4.dhcp=false ipv6.address=none; then
+            echo -e "${BRED}Fatal Error: Failed to create random LXD bridge '$LXD_BRIDGE'. Exiting.${NC}"
+            exit 1
+        fi
         CREATED_LXD_BRIDGE=true
         LXD_BRIDGE_TO_DELETE="$LXD_BRIDGE"
         
         AUTO_IP=$(lxc network get "$LXD_BRIDGE" ipv4.address)
         MAAS_CIDR=$(echo "$AUTO_IP" | awk -F'[/.]' '{print $1"."$2"."$3".0/"$5}')
-        echo -e "  ${BYELLOW}-> Auto-assigned Host's MAAS Subnet CIDR: ${NC}${MAAS_CIDR}"
+        echo -e "  ${BYELLOW}Auto-assigned Host's MAAS Subnet CIDR: ${NC}${MAAS_CIDR}"
         
     elif lxc network show "$LXD_BRIDGE" >/dev/null 2>&1; then
         # Using existing bridge, obtain CIDR
-        echo -e "  ${BYELLOW}-> Bridge '$LXD_BRIDGE' already exists. Fetching CIDR...${NC}"
+        echo -e "  ${BYELLOW}Bridge '${NC}${LXD_BRIDGE}${BYELLOW}' already exists. Fetching CIDR...${NC}"
 
         AUTO_IP=$(lxc network get "$LXD_BRIDGE" ipv4.address)
         MAAS_CIDR=$(echo "$AUTO_IP" | awk -F'[/.]' '{print $1"."$2"."$3".0/"$5}')
-        echo -e "  ${BYELLOW}-> Fetched Host's MAAS Subnet CIDR: ${NC}${MAAS_CIDR}"
+        echo -e "  ${BYELLOW}Fetched Host's MAAS Subnet CIDR: ${NC}${MAAS_CIDR}"
         
     else
         # Creating new bridge, ask for CIDR
@@ -299,14 +317,17 @@ else
         # Using random bridge, create it
         confirm_or_abort "    Create new random bridge '$HOST_BRIDGE' for nested VM uplink?"
         
-        echo "    Creating random managed DHCP + NAT Host Bridge '$HOST_BRIDGE'...${NC}"
-        lxc network create "$HOST_BRIDGE" ipv4.nat=true ipv6.address=none
+        echo "    Creating random managed DHCP + NAT Host Bridge '$HOST_BRIDGE'..."
+        if ! lxc network create "$HOST_BRIDGE" ipv4.nat=true ipv6.address=none; then
+            echo -e "${BRED}Fatal Error: Failed to create random LXD bridge '$HOST_BRIDGE'. Exiting.${NC}"
+            exit 1
+        fi
         CREATED_LXD_BRIDGE=true
         LXD_BRIDGE_TO_DELETE="$HOST_BRIDGE"
         
     elif lxc network show "$HOST_BRIDGE" >/dev/null 2>&1; then
         # Using existing bridge
-        echo -e "  ${BYELLOW}-> Bridge '$HOST_BRIDGE' already exists. Using as uplink...${NC}"
+        echo -e "  ${BYELLOW}Bridge '$HOST_BRIDGE' already exists. Using as uplink...${NC}"
     else
         # Creating new bridge
         CREATE_CUSTOM_LXD_BRIDGE=true
@@ -344,25 +365,25 @@ if [ "$NO_NEST" = true ]; then
         # Using random bridge, create it and obtain CIDR
         confirm_or_abort "    Create new random bridge '$NEUTRON_BRIDGE' to auto-assign CIDR?"
         
-        echo "    Creating random managed DHCP + NAT Neutron bridge '$NEUTRON_BRIDGE'...${NC}"
-        lxc network create "$NEUTRON_BRIDGE" \
-          ipv4.nat=true \
-          ipv4.dhcp=true \
-          ipv6.address=none
+        echo "    Creating random managed DHCP + NAT Neutron bridge '$NEUTRON_BRIDGE'..."
+        if ! lxc network create "$NEUTRON_BRIDGE" ipv4.nat=true ipv4.dhcp=true ipv6.address=none; then
+            echo -e "${BRED}Fatal Error: Failed to create random Neutron bridge '$NEUTRON_BRIDGE'. Exiting.${NC}"
+            exit 1
+        fi
         CREATED_NEUTRON_BRIDGE=true
         NEUTRON_BRIDGE_TO_DELETE="$NEUTRON_BRIDGE"
         
         AUTO_IP=$(lxc network get "$NEUTRON_BRIDGE" ipv4.address)
         NEUTRON_CIDR=$(echo "$AUTO_IP" | awk -F'[/.]' '{print $1"."$2"."$3".0/"$5}')
-        echo -e "  ${BYELLOW}-> Auto-assigned Host's Neutron CIDR: ${NC}${NEUTRON_CIDR}"
+        echo -e "  ${BYELLOW}Auto-assigned Host's Neutron CIDR: ${NC}${NEUTRON_CIDR}"
         
     elif lxc network show "$NEUTRON_BRIDGE" >/dev/null 2>&1; then
         # Using existing bridge, obtain CIDR
-        echo -e "  ${BYELLOW}-> Bridge '$NEUTRON_BRIDGE' already exists. Fetching CIDR...${NC}"
+        echo -e "  ${BYELLOW}Bridge '${NC}${NEUTRON_BRIDGE}${BYELLOW}' already exists. Fetching CIDR...${NC}"
         
         AUTO_IP=$(lxc network get "$NEUTRON_BRIDGE" ipv4.address)
         NEUTRON_CIDR=$(echo "$AUTO_IP" | awk -F'[/.]' '{print $1"."$2"."$3".0/"$5}')
-        echo -e "  ${BYELLOW}-> Fetched Host's Neutron CIDR: ${NC}${NEUTRON_CIDR}"
+        echo -e "  ${BYELLOW}Fetched Host's Neutron CIDR: ${NC}${NEUTRON_CIDR}"
         
     else
         # Creating new bridge, ask for CIDR
@@ -532,11 +553,14 @@ if [ "$NO_NEST" = true ]; then
         confirm_or_abort "  Create managed custom MAAS bridge '$LXD_BRIDGE' (${MAAS_GW_IP}/${MAAS_MASK})?"
         
         echo "  Creating managed non-DHCP + NAT MAAS bridge '$LXD_BRIDGE' ($MAAS_GW_IP)..."
-        lxc network create "$LXD_BRIDGE" \
+        if ! lxc network create "$LXD_BRIDGE" \
           ipv4.address="${MAAS_GW_IP}/${MAAS_MASK}" \
           ipv4.nat=true \
           ipv4.dhcp=false \
-          ipv6.address=none
+          ipv6.address=none; then
+            echo -e "${BRED}Fatal Error: Failed to create custom MAAS bridge '$LXD_BRIDGE'. Exiting.${NC}"
+            exit 1
+        fi
         
         CREATED_LXD_BRIDGE=true
         LXD_BRIDGE_TO_DELETE="$LXD_BRIDGE"
@@ -548,11 +572,14 @@ if [ "$NO_NEST" = true ]; then
         confirm_or_abort "  Create managed custom Neutron bridge '$NEUTRON_BRIDGE' (${NEUTRON_GW_IP}/${NEUTRON_MASK})?"
         
         echo "  Creating managed DHCP + NAT Neutron bridge '$NEUTRON_BRIDGE' ($NEUTRON_GW_IP)..."
-        lxc network create "$NEUTRON_BRIDGE" \
+        if ! lxc network create "$NEUTRON_BRIDGE" \
           ipv4.address="${NEUTRON_GW_IP}/${NEUTRON_MASK}" \
           ipv4.nat=true \
           ipv4.dhcp=true \
-          ipv6.address=none
+          ipv6.address=none; then
+            echo -e "${BRED}Fatal Error: Failed to create custom Neutron bridge '$NEUTRON_BRIDGE'. Exiting.${NC}"
+            exit 1
+        fi
         
         CREATED_NEUTRON_BRIDGE=true
         NEUTRON_BRIDGE_TO_DELETE="$NEUTRON_BRIDGE"
@@ -618,18 +645,63 @@ echo -e "${BYELLOW}----- Starting Cleanup for $VM_NAME -----${NC}"
 echo ""
 
 # 1. Delete the VM
-echo -e "${BYELLOW}-> 1. Deleting LXD VM: $VM_NAME... ${NC}"
+echo -e "${BYELLOW}-> 1. Stopping and Deleting LXD VM: $VM_NAME... ${NC}"
 echo ""
 if lxc info "$VM_NAME" >/dev/null 2>&1; then
+    lxc stop -f "$VM_NAME" 2 || true
+    sleep 2 # Wait for Ceph/OSD storage locks to release
     lxc delete -f "$VM_NAME"
 else
     echo "VM '$VM_NAME' not found, skipping..."
     echo ""
 fi
 
-# 2. Delete the Host/MAAS Bridge (if we auto-generated it)
+# 2. ONLY purge project if NO_NEST is true AND the project is NOT 'default'
+if [[ "$NO_NEST" == "true" ]]; then
+
+    echo -e "${BYELLOW}-> 2. Cleaning up dedicated LXD project: $LXD_PROJECT... ${NC}"
+    echo ""
+
+    if [[ "$LXD_PROJECT" != "default" ]]; then
+        if lxc project list | grep -q " $LXD_PROJECT "; then
+            
+            # Delete all instances inside the $LXD_PROJECT project first
+            echo "Stopping and deleting all instances in project '$LXD_PROJECT'..."
+            for inst in \$(lxc list --project $LXD_PROJECT --format json | jq -r '.[].name'); do
+                lxc stop -f --project $LXD_PROJECT "\$inst" || true
+                lxc delete -f --project $LXD_PROJECT "\$inst"
+            done
+            
+            sleep 2 # Wait for Ceph/OSD storage locks to release
+            
+            # Delete all storage volumes inside the $LXD_PROJECT project
+            echo "Deleting storage volumes in project '$LXD_PROJECT'..."
+            for vol in \$(lxc storage volume list $POOL_NAME --project $LXD_PROJECT --format json | jq -r '.[] | select(.type=="custom") | .name'); do
+                lxc storage volume delete $POOL_NAME "\$vol" --project $LXD_PROJECT
+            done
+            
+            # Delete all images inside the $LXD_PROJECT project
+            echo "Deleting images in project '$LXD_PROJECT'..."
+            for img in \$(lxc image list --project $LXD_PROJECT --format json | jq -r '.[].fingerprint'); do
+                lxc image delete --project $LXD_PROJECT "\$img"
+            done
+            
+            # Switch to default to ensure we aren't "inside" the project we are deleting
+            lxc project switch default >/dev/null 2>&1
+            lxc project delete $LXD_PROJECT
+        else
+            echo "LXD project '$LXD_PROJECT' not found, skipping..."
+            echo ""
+        fi
+    else
+        echo "Selected '$LXD_PROJECT' LXD project, skipping... (Leaving cleanup to user)"
+        echo ""
+    fi
+fi
+
+# 3. Delete the Host/MAAS Bridge (if we auto-generated it)
 if [ "$CREATED_LXD_BRIDGE" = true ]; then
-    echo -e "${BYELLOW}-> 2. Deleting unique LXD Bridge: $LXD_BRIDGE_TO_DELETE... ${NC}"
+    echo -e "${BYELLOW}-> 3. Deleting unique LXD Bridge: $LXD_BRIDGE_TO_DELETE... ${NC}"
     echo ""
     if lxc network show "$LXD_BRIDGE_TO_DELETE" >/dev/null 2>&1; then
         lxc network delete "$LXD_BRIDGE_TO_DELETE"
@@ -639,48 +711,14 @@ if [ "$CREATED_LXD_BRIDGE" = true ]; then
     fi
 fi
 
-# 3. Delete the Neutron Bridge (if we auto-generated it)
+# 4. Delete the Neutron Bridge (if we auto-generated it)
 if [ "$CREATED_NEUTRON_BRIDGE" = true ]; then
-    echo -e "${BYELLOW}-> 3. Deleting unique Neutron Bridge: $NEUTRON_BRIDGE_TO_DELETE... ${NC}"
+    echo -e "${BYELLOW}-> 4. Deleting unique Neutron Bridge: $NEUTRON_BRIDGE_TO_DELETE... ${NC}"
     echo ""
     if lxc network show "$NEUTRON_BRIDGE_TO_DELETE" >/dev/null 2>&1; then
         lxc network delete "$NEUTRON_BRIDGE_TO_DELETE"
     else
         echo "Neutron Bridge '$NEUTRON_BRIDGE_TO_DELETE' not found, skipping..."
-        echo ""
-    fi
-fi
-
-# ONLY purge project if NO_NEST is true AND the project is NOT 'default'
-if [[ "$NO_NEST" == "true" ]] && [[ "$LXD_PROJECT" != "default" ]]; then
-    # 4. Delete the LXD project created by MAAS
-    echo -e "${BYELLOW}-> 4. Cleaning up LXD project: $LXD_PROJECT... ${NC}"
-    echo ""
-    if lxc project list | grep -q " $LXD_PROJECT "; then
-        # Delete all instances inside the $LXD_PROJECT project first
-        echo "Stopping and deleting all instances in project '$LXD_PROJECT'..."
-        for inst in \$(lxc list --project $LXD_PROJECT --format json | jq -r '.[].name'); do
-            lxc delete -f --project $LXD_PROJECT "\$inst"
-        done
-
-        # Delete all storage volumes inside the $LXD_PROJECT project
-        echo "Deleting storage volumes in project '$LXD_PROJECT'..."
-        for vol in \$(lxc storage volume list $POOL_NAME --project $LXD_PROJECT --format json | jq -r '.[] | select(.type=="custom") | .name'); do
-            lxc storage volume delete $POOL_NAME "\$vol" --project $LXD_PROJECT
-        done
-
-        # Delete all images inside the $LXD_PROJECT project
-        echo "Deleting images in project '$LXD_PROJECT'..."
-        for img in \$(lxc image list --project $LXD_PROJECT --format json | jq -r '.[].fingerprint'); do
-            lxc image delete --project $LXD_PROJECT "\$img"
-        done
-        
-        # Switch to default to ensure we aren't "inside" the project we are deleting
-        lxc project switch default >/dev/null 2>&1
-        lxc project delete $LXD_PROJECT
-        echo ""
-    else
-        echo "LXD project '$LXD_PROJECT' not found, skipping..."
         echo ""
     fi
 fi
@@ -698,12 +736,26 @@ echo -e "${BYELLOW}-> 2. Cleanup script created:${NC} $CLEANUP_SCRIPT"
 echo ""
 echo -e "${BYELLOW}-> 3. Obtaining IP Address... ${NC}"
 echo ""
+
 # Loop until we get an IPv4 address on eth0 (or enp5s0)
 IP=""
+TIMEOUT=0
+
 while [ -z "$IP" ]; do
+    if [ "$TIMEOUT" -ge "$MAX_WAIT" ]; then
+        echo -e "${BRED}Fatal Error: Timed out waiting for VM to get an IP address.${NC}"
+        echo -e "Run '${NC}${CLEANUP_SCRIPT}${BYELLOW}' to clean up the environment.${NC}"
+        exit 1
+    fi
+
     IP=$(lxc list "$VM_NAME" --format=json | jq -r '.[0].state.network | to_entries[] | select(.key=="eth0" or .key=="enp5s0") | .value.addresses[] | select(.family=="inet" and .scope=="global") | .address' | head -n 1)
-    sleep 2
+
+    if [ -z "$IP" ]; then
+        sleep 2
+        TIMEOUT=$((TIMEOUT + 2))
+    fi
 done
+
 echo "Target IP: $IP"
 echo ""
 

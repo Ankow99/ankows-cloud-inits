@@ -35,7 +35,7 @@
 {% set custom_maas_dns = "8.8.8.8" %}
 {% set custom_maas_ip_start = "10.0.3.200" %}
 {% set custom_maas_ip_end = "10.0.3.254" %}
-{% set custom_maas_images = "noble jammy" %}
+{% set custom_maas_images = "noble" %}
 {% set custom_maas_db_name = "maas_db" %}
 {% set custom_maas_space = "sunspace" %}
 
@@ -46,14 +46,14 @@
 {% set custom_os_pub_api_start = "10.0.3.0" %}
 {% set custom_os_pub_api_end = "10.0.3.99" %}
 {% set custom_os_neutron_cidr = "10.10.10.0/24" %}
-{% set custom_os_neutron_bridge = "neubr0" %}
+{% set custom_os_neutron_bridge = "nbr0" %}
 
 # --- Hardware Allocation ---
-# Nodes: ( CPU = 24 | RAM = 52GiB | DISK = 280GiB ) (per node)
+# Nodes: ( CPU = 18 | RAM = 52GiB | DISK = 280GiB ) (per node)
 # MAAS:  ( CPU = 4  | RAM = 8GiB  | DISK = 30GiB  ) <-- if nested
 
 # HA Settings
-{% set custom_ha_nodes = 3 %}
+{% set custom_ha_nodes = 1 %}
 {% set custom_osds_per_node = 4 %}
 
 # MAAS Region+Rack Controller (This VM)
@@ -62,17 +62,17 @@
 {% set custom_maas_disk = "30GiB" %}
 
 # Juju Controller Defaults per node
-{% set custom_juju_cpu = "6" %}
+{% set custom_juju_cpu = "3" %}
 {% set custom_juju_ram = "10GiB" %}
 {% set custom_juju_disk = "30GiB" %}
 
 # Sunbeam Controller Defaults per node
-{% set custom_sunbeam_cpu = "6" %}
+{% set custom_sunbeam_cpu = "3" %}
 {% set custom_sunbeam_ram = "10GiB" %}
 {% set custom_sunbeam_disk = "30GiB" %}
 
 # Cloud Node Defaults per node
-{% set custom_cloud_cpu = "16" %}
+{% set custom_cloud_cpu = "12" %}
 {% set custom_cloud_ram = "32GiB" %}
 {% set custom_cloud_disk = "100GiB" %}
 {% set custom_cloud_osd_disk = "30GiB" %}
