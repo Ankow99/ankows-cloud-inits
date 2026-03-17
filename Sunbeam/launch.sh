@@ -27,6 +27,10 @@ ACCEPT_DEFAULTS=false
 # Array to hold dynamic LXD and Jinja flags
 LXC_OPTIONAL_ARGS=()
 
+# Generate the random bridges: 8 hex chars + specific suffix
+RANDOM_MAAS_BRIDGE="$(openssl rand -hex 4)_br0"
+RANDOM_NEU_BRIDGE="$(openssl rand -hex 4)_nbr0"
+
 # --- Colors ---
 # Check if stderr is a TTY
 if [ -t 2 ]; then
@@ -134,39 +138,6 @@ else
     SSH_INT_OPTS=(-q -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null")
 fi
 
-# --- Prompt Helper Function ---
-# Usage: ask_var "Prompt Text" "Default" "cloud_init_key" "bash_var_name"
-ask_var() {
-    local prompt_text="$1"
-    local default_val="$2"
-    local config_key="$3"
-    local var_name="$4"
-    local user_input
-
-    if [ "$ACCEPT_DEFAULTS" = true ]; then
-        user_input="$default_val"
-    else
-        echo -ne "  ${BYELLOW}${prompt_text} [${NC}${default_val}${BYELLOW}]: ${NC}"
-        read -r user_input
-        if [ -z "$user_input" ]; then
-            user_input="$default_val"
-        fi
-    fi
-
-    if [[ "$default_val" == *"GiB" ]] && [[ "$user_input" =~ ^[0-9]+$ ]]; then
-        user_input="${user_input}GiB"
-    fi
-
-    if [ -n "$config_key" ]; then
-        LXC_OPTIONAL_ARGS+=("-c" "user.${config_key}=${user_input}")
-    fi
-
-    if [ -n "$var_name" ]; then
-        eval "$var_name=\"\$user_input\""
-    fi
-}
-
-# Helper to extract numbers for math
 extract_num() {
     echo "$1" | sed -E 's/[^0-9]//g'
 }
@@ -174,12 +145,61 @@ extract_num() {
 confirm_or_abort() {
     local prompt_msg="$1"
 
-    echo -ne "  ${prompt_msg} [y/N]: "
+    # Auto-confirm if -a flag was passed
+    if [ "$ACCEPT_DEFAULTS" = true ]; then
+        return 0
+    fi
+
+    echo -ne "${prompt_msg} [y/N]: "
     read -r confirm_input
     if [[ ! "$confirm_input" =~ ^[Yy]$ ]]; then
         echo ""
         echo -e "${BRED}Action aborted by user. Exiting.${NC}"
         exit 1
+    fi
+}
+
+get_default() {
+    grep -E "^\s*\{\%\s*set\s+custom_$1\s*=" "$CLOUD_INIT" | sed -E 's/.*=\s*"?(.*?)"?\s*%\}.*/\1/'
+}
+
+# Prompt Helper Function - ask_var "Prompt Text" "jinja_var_name" "bash_var_name"
+ask_var() {
+    local prompt_text="$1"
+    local config_key="$2"
+    local var_name="$3"
+    local default_val=""
+    local user_input
+
+    # Extract default from Jinja cloud-init template
+    if [ -n "$config_key" ] && [ -f "$CLOUD_INIT" ]; then
+        default_val=$(get_default "$config_key")
+    fi
+
+    if [ "$ACCEPT_DEFAULTS" = true ]; then
+        user_input="$default_val"
+    else
+        echo -ne "  ${BYELLOW}${prompt_text} [${NC}${default_val}${BYELLOW}]: ${NC}"
+        read -r user_input
+        
+        if [ -z "$user_input" ]; then
+            user_input="$default_val"
+        fi
+    fi
+
+    # Smart GiB appending
+    if [[ "$default_val" == *"GiB" ]] && [[ "$user_input" =~ ^[0-9]+$ ]]; then
+        user_input="${user_input}GiB"
+    fi
+
+    # Export to LXC args if a config key exists
+    if [ -n "$config_key" ]; then
+        LXC_OPTIONAL_ARGS+=("-c" "user.${config_key}=${user_input}")
+    fi
+
+    # Bind to bash variable if requested
+    if [ -n "$var_name" ]; then
+        eval "$var_name=\"\$user_input\""
     fi
 }
 
@@ -190,88 +210,210 @@ confirm_or_abort() {
 if [ "$ACCEPT_DEFAULTS" = false ]; then
     echo -e "${BYELLOW}--- 1. Authentication & System ---${NC}"
 fi
-ask_var "System User" "ubuntu" "user" "SYS_USER"
-ask_var "System Password" "ubuntu" "password" ""
-ask_var "Hostname (leave blank to use VM name)" "" "hostname" ""
-ask_var "Top Level Domain" "sunbeam" "tld" "MAAS_DOMAIN"
-ask_var "Timezone" "America/New_York" "timezone" ""
+ask_var "System User" "user" "SYS_USER"
+ask_var "System Password" "password" ""
+ask_var "Hostname (leave blank to use VM name)" "hostname" ""
+ask_var "Top Level Domain" "tld" "MAAS_DOMAIN"
+ask_var "Timezone" "timezone" ""
 
 if [ "$ACCEPT_DEFAULTS" = false ]; then
     echo ""
     echo -e "${BYELLOW}--- 2. Snap Channels ---${NC}"
 fi
-ask_var "LXD Channel" "5.21/stable" "lxd_channel" ""
-ask_var "MAAS Channel" "3.7/stable" "maas_channel" ""
-ask_var "Sunbeam Channel" "2024.1/stable" "sunbeam_channel" ""
+ask_var "LXD Channel" "lxd_channel" ""
+ask_var "MAAS Channel" "maas_channel" ""
+ask_var "Sunbeam Channel" "sunbeam_channel" ""
 
 if [ "$ACCEPT_DEFAULTS" = false ]; then
     echo ""
     echo -e "${BYELLOW}--- 3. LXD & MAAS Base Settings ---${NC}"
 fi
 # Dynamic LXD Project and Bridge Prompts
-ask_var "LXD Project Name" "sunlxd" "lxd_project" "LXD_PROJECT"
-ask_var "LXD Storage Pool" "default" "lxd_pool" "POOL_NAME"
+ask_var "LXD Project Name" "lxd_project" "LXD_PROJECT"
+ask_var "LXD Storage Pool" "lxd_pool" "POOL_NAME"
+
+CREATED_LXD_BRIDGE=false
+LXD_BRIDGE_TO_DELETE=""
+CREATE_CUSTOM_LXD_BRIDGE=false
 
 if [ "$NO_NEST" = true ]; then
-    ask_var "Host's LXD Bridge Name" "mbr0" "lxd_bridge" "LXD_BRIDGE"
-    ask_var "Host's MAAS Subnet CIDR" "10.0.0.0/22" "" "MAAS_CIDR"
+    if [ "$ACCEPT_DEFAULTS" = true ]; then
+        LXD_BRIDGE="$RANDOM_MAAS_BRIDGE"
+    else
+        echo -ne "  ${BYELLOW}Host's LXD Bridge Name [${NC}${RANDOM_MAAS_BRIDGE}${BYELLOW}]: ${NC}"
+        read -r user_input
+        LXD_BRIDGE="${user_input:-$RANDOM_MAAS_BRIDGE}"
+    fi
+    LXC_OPTIONAL_ARGS+=("-c" "user.lxd_bridge=$LXD_BRIDGE")
+    
+    # 3-Path CIDR Logic
+    if [ "$LXD_BRIDGE" = "$RANDOM_MAAS_BRIDGE" ]; then
+        # Using random bridge, create it and obtain CIDR
+        confirm_or_abort "    Create new random bridge '$LXD_BRIDGE' to auto-assign CIDR?"
+        
+        echo "    Creating random managed non-DHCP + NAT MAAS bridge '$LXD_BRIDGE'...${NC}"
+        lxc network create "$LXD_BRIDGE" \
+          ipv4.nat=true \
+          ipv4.dhcp=false \
+          ipv6.address=none
+        CREATED_LXD_BRIDGE=true
+        LXD_BRIDGE_TO_DELETE="$LXD_BRIDGE"
+        
+        AUTO_IP=$(lxc network get "$LXD_BRIDGE" ipv4.address)
+        MAAS_CIDR=$(echo "$AUTO_IP" | awk -F'[/.]' '{print $1"."$2"."$3".0/"$5}')
+        echo -e "  ${BYELLOW}-> Auto-assigned Host's MAAS Subnet CIDR: ${NC}${MAAS_CIDR}"
+        
+    elif lxc network show "$LXD_BRIDGE" >/dev/null 2>&1; then
+        # Using existing bridge, obtain CIDR
+        echo -e "  ${BYELLOW}-> Bridge '$LXD_BRIDGE' already exists. Fetching CIDR...${NC}"
+
+        AUTO_IP=$(lxc network get "$LXD_BRIDGE" ipv4.address)
+        MAAS_CIDR=$(echo "$AUTO_IP" | awk -F'[/.]' '{print $1"."$2"."$3".0/"$5}')
+        echo -e "  ${BYELLOW}-> Fetched Host's MAAS Subnet CIDR: ${NC}${MAAS_CIDR}"
+        
+    else
+        # Creating new bridge, ask for CIDR
+        JINJA_CIDR=$(get_default "maas_subnet")
+        if [ "$ACCEPT_DEFAULTS" = true ]; then
+            MAAS_CIDR="$JINJA_CIDR"
+        else
+            echo -e "  ${BYELLOW}Host's MAAS Subnet CIDR [${NC}${JINJA_CIDR}${BYELLOW}]: ${NC}"
+            read -r user_input
+            MAAS_CIDR="${user_input:-$JINJA_CIDR}"
+        fi
+        CREATE_CUSTOM_LXD_BRIDGE=true
+    fi
+    LXC_OPTIONAL_ARGS+=("-c" "user.maas_subnet=$MAAS_CIDR")
 else
-    ask_var "Host's LXD Bridge (For VM Attachment)" "lxdbr0" "" "HOST_BRIDGE"
+    # Nested LXD external bridge
+    if [ "$ACCEPT_DEFAULTS" = true ]; then
+        HOST_BRIDGE="$RANDOM_MAAS_BRIDGE"
+    else
+        echo -ne "  ${BYELLOW}Host's LXD Bridge (For VM Attachment) [${NC}${RANDOM_MAAS_BRIDGE}${BYELLOW}]: ${NC}"
+        read -r user_input
+        HOST_BRIDGE="${user_input:-$RANDOM_MAAS_BRIDGE}"
+    fi
+    
+    # 3-Path CIDR Logic
+    if [ "$HOST_BRIDGE" = "$RANDOM_MAAS_BRIDGE" ]; then
+        # Using random bridge, create it
+        confirm_or_abort "    Create new random bridge '$HOST_BRIDGE' for nested VM uplink?"
+        
+        echo "    Creating random managed DHCP + NAT Host Bridge '$HOST_BRIDGE'...${NC}"
+        lxc network create "$HOST_BRIDGE" ipv4.nat=true ipv6.address=none
+        CREATED_LXD_BRIDGE=true
+        LXD_BRIDGE_TO_DELETE="$HOST_BRIDGE"
+        
+    elif lxc network show "$HOST_BRIDGE" >/dev/null 2>&1; then
+        # Using existing bridge
+        echo -e "  ${BYELLOW}-> Bridge '$HOST_BRIDGE' already exists. Using as uplink...${NC}"
+    else
+        # Creating new bridge
+        CREATE_CUSTOM_LXD_BRIDGE=true
+    fi
 fi
-ask_var "MAAS Admin User" "admin" "maas_user" ""
-ask_var "MAAS Admin Password" "admin" "maas_password" ""
-ask_var "MAAS Admin Email" "admin@mail.com" "maas_email" ""
-ask_var "MAAS DNS Forwarder" "8.8.8.8" "maas_dns" "MAAS_DNS"
-ask_var "MAAS Network Space" "sunspace" "maas_space" ""
-ask_var "MAAS Deploy Images (space separated)" "noble" "maas_images" ""
+ask_var "MAAS Admin User" "maas_user" ""
+ask_var "MAAS Admin Password" "maas_password" ""
+ask_var "MAAS Admin Email" "maas_email" ""
+ask_var "MAAS DNS Forwarder" "maas_dns" "MAAS_DNS"
+ask_var "MAAS Network Space" "maas_space" ""
+ask_var "MAAS Deploy Images (space separated)" "maas_images" ""
 
 if [ "$ACCEPT_DEFAULTS" = false ]; then
     echo ""
     echo -e "${BYELLOW}--- 4. OpenStack Deployment ---${NC}"
 fi
-ask_var "OpenStack Deployment Name" "sunbeam" "os_deployment" ""
+ask_var "OpenStack Deployment Name" "os_deployment" ""
+
+CREATED_NEUTRON_BRIDGE=false
+NEUTRON_BRIDGE_TO_DELETE=""
+CREATE_CUSTOM_NEUTRON_BRIDGE=false
 
 if [ "$NO_NEST" = true ]; then
-    ask_var "Host's Neutron Bridge Name" "lxdbr0" "os_neutron_bridge" "NEUTRON_BRIDGE"
-    ask_var "Host's Neutron CIDR" "10.10.10.0/24" "" "NEUTRON_CIDR"
+    if [ "$ACCEPT_DEFAULTS" = true ]; then
+        NEUTRON_BRIDGE="$RANDOM_NEU_BRIDGE"
+    else
+        echo -ne "  ${BYELLOW}Host's Neutron Bridge Name [${NC}${RANDOM_NEU_BRIDGE}${BYELLOW}]: ${NC}"
+        read -r user_input
+        NEUTRON_BRIDGE="${user_input:-$RANDOM_NEU_BRIDGE}"
+    fi
+    LXC_OPTIONAL_ARGS+=("-c" "user.os_neutron_bridge=$NEUTRON_BRIDGE")
+    
+    # 3-Path CIDR Logic
+    if [ "$NEUTRON_BRIDGE" = "$RANDOM_NEU_BRIDGE" ]; then
+        # Using random bridge, create it and obtain CIDR
+        confirm_or_abort "    Create new random bridge '$NEUTRON_BRIDGE' to auto-assign CIDR?"
+        
+        echo "    Creating random managed DHCP + NAT Neutron bridge '$NEUTRON_BRIDGE'...${NC}"
+        lxc network create "$NEUTRON_BRIDGE" \
+          ipv4.nat=true \
+          ipv4.dhcp=true \
+          ipv6.address=none
+        CREATED_NEUTRON_BRIDGE=true
+        NEUTRON_BRIDGE_TO_DELETE="$NEUTRON_BRIDGE"
+        
+        AUTO_IP=$(lxc network get "$NEUTRON_BRIDGE" ipv4.address)
+        NEUTRON_CIDR=$(echo "$AUTO_IP" | awk -F'[/.]' '{print $1"."$2"."$3".0/"$5}')
+        echo -e "  ${BYELLOW}-> Auto-assigned Host's Neutron CIDR: ${NC}${NEUTRON_CIDR}"
+        
+    elif lxc network show "$NEUTRON_BRIDGE" >/dev/null 2>&1; then
+        # Using existing bridge, obtain CIDR
+        echo -e "  ${BYELLOW}-> Bridge '$NEUTRON_BRIDGE' already exists. Fetching CIDR...${NC}"
+        
+        AUTO_IP=$(lxc network get "$NEUTRON_BRIDGE" ipv4.address)
+        NEUTRON_CIDR=$(echo "$AUTO_IP" | awk -F'[/.]' '{print $1"."$2"."$3".0/"$5}')
+        echo -e "  ${BYELLOW}-> Fetched Host's Neutron CIDR: ${NC}${NEUTRON_CIDR}"
+        
+    else
+        # Creating new bridge, ask for CIDR
+        JINJA_CIDR=$(get_default "os_neutron_cidr")
+        if [ "$ACCEPT_DEFAULTS" = true ]; then
+            NEUTRON_CIDR="$JINJA_CIDR"
+        else
+            echo -ne "  ${BYELLOW}Host's Neutron CIDR [${NC}${JINJA_CIDR}${BYELLOW}]: ${NC}"
+            read -r user_input
+            NEUTRON_CIDR="${user_input:-$JINJA_CIDR}"
+        fi
+        CREATE_CUSTOM_NEUTRON_BRIDGE=true
+    fi
+    LXC_OPTIONAL_ARGS+=("-c" "user.os_neutron_cidr=$NEUTRON_CIDR")
 fi
 
 if [ "$ACCEPT_DEFAULTS" = false ]; then
     echo ""
     echo -e "${BYELLOW}--- 5. Hardware & Scaling Allocation ---${NC}"
 fi
-ask_var "Number of HA Nodes (1 or 3+)" "1" "ha_nodes" "HA_NODES"
-ask_var "Availability Zones (space separated)" "AZ1" "az_names" ""
+ask_var "Number of HA Nodes (1 or 3+)" "ha_nodes" "HA_NODES"
 
 if [ "$ACCEPT_DEFAULTS" = false ]; then
     echo "  -- MAAS Node Resources --"
 fi
-ask_var "MAAS Server CPU cores" "4" "" "MAAS_CPU"
-ask_var "MAAS Server RAM" "8GiB" "" "MAAS_RAM"
-ask_var "MAAS Server Root Disk" "30GiB" "" "MAAS_DISK"
+ask_var "MAAS Server CPU cores" "maas_cpu" "MAAS_CPU"
+ask_var "MAAS Server RAM" "maas_ram" "MAAS_RAM"
+ask_var "MAAS Server Root Disk" "maas_disk" "MAAS_DISK"
 
 if [ "$ACCEPT_DEFAULTS" = false ]; then
     echo "  -- Juju Controllers --"
 fi
-ask_var "Juju Controller CPU cores" "2" "juju_cpu" "JUJU_CPU"
-ask_var "Juju Controller RAM" "6GiB" "juju_ram" "JUJU_RAM"
-ask_var "Juju Controller Root Disk" "30GiB" "juju_disk" "JUJU_DISK"
+ask_var "Juju Controller CPU cores" "juju_cpu" "JUJU_CPU"
+ask_var "Juju Controller RAM" "juju_ram" "JUJU_RAM"
+ask_var "Juju Controller Root Disk" "juju_disk" "JUJU_DISK"
 
 if [ "$ACCEPT_DEFAULTS" = false ]; then
     echo "  -- Sunbeam Controllers --"
 fi
-ask_var "Sunbeam Controller CPU cores" "2" "sunbeam_cpu" "SUNBEAM_CPU"
-ask_var "Sunbeam Controller RAM" "6GiB" "sunbeam_ram" "SUNBEAM_RAM"
-ask_var "Sunbeam Controller Root Disk" "30GiB" "sunbeam_disk" "SUNBEAM_DISK"
+ask_var "Sunbeam Controller CPU cores" "sunbeam_cpu" "SUNBEAM_CPU"
+ask_var "Sunbeam Controller RAM" "sunbeam_ram" "SUNBEAM_RAM"
+ask_var "Sunbeam Controller Root Disk" "sunbeam_disk" "SUNBEAM_DISK"
 
 if [ "$ACCEPT_DEFAULTS" = false ]; then
     echo "  -- Cloud Compute/Storage Nodes --"
 fi
-ask_var "Cloud Node CPU cores" "12" "cloud_cpu" "CLOUD_CPU"
-ask_var "Cloud Node RAM" "32GiB" "cloud_ram" "CLOUD_RAM"
-ask_var "Cloud Node Root Disk" "100GiB" "cloud_disk" "CLOUD_DISK"
-ask_var "Cloud Node OSD Disk (Each)" "30GiB" "cloud_osd_disk" "CLOUD_OSD"
-ask_var "Number of OSDs per Cloud Node" "3" "osds_per_node" "OSDS_PER"
+ask_var "Cloud Node CPU cores" "cloud_cpu" "CLOUD_CPU"
+ask_var "Cloud Node RAM" "cloud_ram" "CLOUD_RAM"
+ask_var "Cloud Node Root Disk" "cloud_disk" "CLOUD_DISK"
+ask_var "Cloud Node OSD Disk (Each)" "cloud_osd_disk" "CLOUD_OSD"
+ask_var "Number of OSDs per Cloud Node" "osds_per_node" "OSDS_PER"
 
 if [ "$ACCEPT_DEFAULTS" = false ]; then
     echo ""
@@ -384,36 +526,41 @@ fi
 # Non-nested static IP network configuration
 if [ "$NO_NEST" = true ]; then
     
-    # 1. Ensure MAAS Bridge exists
-    if ! lxc network show "$LXD_BRIDGE" >/dev/null 2>&1; then
+    # 1. Create custom MAAS bridge if required
+    if [ "$CREATE_CUSTOM_LXD_BRIDGE" = true ]; then
         echo ""
-        echo -e "${BYELLOW}-> The MAAS bridge '${NC}${LXD_BRIDGE}${BYELLOW}' was not found on the host.${NC}"
-        confirm_or_abort "Do you want to create it now with IP ${MAAS_GW_IP}/${MAAS_MASK}?"
+        confirm_or_abort "  Create managed custom MAAS bridge '$LXD_BRIDGE' (${MAAS_GW_IP}/${MAAS_MASK})?"
         
-        echo "Creating managed non-DHCP + NAT MAAS bridge $LXD_BRIDGE ($MAAS_GW_IP)..."
+        echo "  Creating managed non-DHCP + NAT MAAS bridge '$LXD_BRIDGE' ($MAAS_GW_IP)..."
         lxc network create "$LXD_BRIDGE" \
           ipv4.address="${MAAS_GW_IP}/${MAAS_MASK}" \
           ipv4.nat=true \
           ipv4.dhcp=false \
           ipv6.address=none
+        
+        CREATED_LXD_BRIDGE=true
+        LXD_BRIDGE_TO_DELETE="$LXD_BRIDGE"
     fi
     
-    # 2. Ensure Neutron Bridge exists
-    if ! lxc network show "$NEUTRON_BRIDGE" >/dev/null 2>&1; then
+    # 2. Create custom Neutron bridge if required
+    if [ "$CREATE_CUSTOM_NEUTRON_BRIDGE" = true ]; then
         echo ""
-        echo -e "${BYELLOW}-> The Neutron bridge '${NC}${NEUTRON_BRIDGE}${BYELLOW}' was not found on the host.${NC}"
-        confirm_or_abort "Do you want to create it now with IP ${NEUTRON_GW_IP}/${NEUTRON_MASK}?"
+        confirm_or_abort "  Create managed custom Neutron bridge '$NEUTRON_BRIDGE' (${NEUTRON_GW_IP}/${NEUTRON_MASK})?"
         
-        echo "Creating managed DHCP Neutron bridge $NEUTRON_BRIDGE ($NEUTRON_GW_IP)..."
+        echo "  Creating managed DHCP + NAT Neutron bridge '$NEUTRON_BRIDGE' ($NEUTRON_GW_IP)..."
         lxc network create "$NEUTRON_BRIDGE" \
           ipv4.address="${NEUTRON_GW_IP}/${NEUTRON_MASK}" \
           ipv4.nat=true \
           ipv4.dhcp=true \
           ipv6.address=none
+        
+        CREATED_NEUTRON_BRIDGE=true
+        NEUTRON_BRIDGE_TO_DELETE="$NEUTRON_BRIDGE"
     fi
     
     [[ -z "$MAAS_DOMAIN" ]] && MAAS_DOMAIN="maas"
     
+    # Set netplan config with static IP, non DHCP and MAAS DNS server
     read -r -d '' STATIC_NET <<EOF
 network:
   version: 2
@@ -429,11 +576,21 @@ network:
         search: [${MAAS_DOMAIN}, maas]
 EOF
     
-    # Inject static net config and attach to the custom Non-nested bridge
+    # Inject static net config and attach to the custom non-nested bridge
     LXC_OPTIONAL_ARGS+=("-c" "cloud-init.network-config=$STATIC_NET")
     LXC_OPTIONAL_ARGS+=("-d" "eth0,network=$LXD_BRIDGE")
 else
-    # Nested LXD VMs use DHCP by default and attach to standard bridge
+    # Create custom LXD bridge if required
+    if [ "$CREATE_CUSTOM_LXD_BRIDGE" = true ]; then
+        echo ""
+        confirm_or_abort "  Create managed custom LXD bridge '${HOST_BRIDGE}'?"
+        
+        echo "  Creating managed DHCP + NAT Host Bridge '$HOST_BRIDGE'..."
+        lxc network create "$HOST_BRIDGE" ipv4.nat=true ipv6.address=none
+        
+        CREATED_LXD_BRIDGE=true
+        LXD_BRIDGE_TO_DELETE="$HOST_BRIDGE"
+    fi
     LXC_OPTIONAL_ARGS+=("-d" "eth0,network=$HOST_BRIDGE")
 fi
 
@@ -466,14 +623,38 @@ echo ""
 if lxc info "$VM_NAME" >/dev/null 2>&1; then
     lxc delete -f "$VM_NAME"
 else
-    echo -e "VM '$VM_NAME' not found, skipping..."
+    echo "VM '$VM_NAME' not found, skipping..."
     echo ""
+fi
+
+# 2. Delete the Host/MAAS Bridge (if we auto-generated it)
+if [ "$CREATED_LXD_BRIDGE" = true ]; then
+    echo -e "${BYELLOW}-> 2. Deleting unique LXD Bridge: $LXD_BRIDGE_TO_DELETE... ${NC}"
+    echo ""
+    if lxc network show "$LXD_BRIDGE_TO_DELETE" >/dev/null 2>&1; then
+        lxc network delete "$LXD_BRIDGE_TO_DELETE"
+    else
+        echo "LXD Bridge '$LXD_BRIDGE_TO_DELETE' not found, skipping..."
+        echo ""
+    fi
+fi
+
+# 3. Delete the Neutron Bridge (if we auto-generated it)
+if [ "$CREATED_NEUTRON_BRIDGE" = true ]; then
+    echo -e "${BYELLOW}-> 3. Deleting unique Neutron Bridge: $NEUTRON_BRIDGE_TO_DELETE... ${NC}"
+    echo ""
+    if lxc network show "$NEUTRON_BRIDGE_TO_DELETE" >/dev/null 2>&1; then
+        lxc network delete "$NEUTRON_BRIDGE_TO_DELETE"
+    else
+        echo "Neutron Bridge '$NEUTRON_BRIDGE_TO_DELETE' not found, skipping..."
+        echo ""
+    fi
 fi
 
 # ONLY purge project if NO_NEST is true AND the project is NOT 'default'
 if [[ "$NO_NEST" == "true" ]] && [[ "$LXD_PROJECT" != "default" ]]; then
-    # 2. Delete the LXD project created by MAAS
-    echo -e "${BYELLOW}-> 2. Cleaning up LXD project: $LXD_PROJECT... ${NC}"
+    # 4. Delete the LXD project created by MAAS
+    echo -e "${BYELLOW}-> 4. Cleaning up LXD project: $LXD_PROJECT... ${NC}"
     echo ""
     if lxc project list | grep -q " $LXD_PROJECT "; then
         # Delete all instances inside the $LXD_PROJECT project first
@@ -505,7 +686,7 @@ if [[ "$NO_NEST" == "true" ]] && [[ "$LXD_PROJECT" != "default" ]]; then
 fi
 
 echo -e "${BYELLOW}----- Cleanup Complete -----${NC}"
-rm -- "\$0"
+# rm -- "\$0" # Self-deletion removed for auditing purposes.
 EOF
 
 chmod +x "$CLEANUP_SCRIPT"

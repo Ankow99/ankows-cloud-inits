@@ -46,7 +46,7 @@
 {% set custom_os_pub_api_start = "10.0.3.0" %}
 {% set custom_os_pub_api_end = "10.0.3.99" %}
 {% set custom_os_neutron_cidr = "10.10.10.0/24" %}
-{% set custom_os_neutron_bridge = "lxdbr0" %}
+{% set custom_os_neutron_bridge = "neubr0" %}
 
 # --- Hardware Allocation ---
 # Nodes: ( CPU = 24 | RAM = 52GiB | DISK = 280GiB ) (per node)
@@ -54,8 +54,12 @@
 
 # HA Settings
 {% set custom_ha_nodes = 3 %}
-{% set custom_az_names = "AZ1 AZ2 AZ3" %}
 {% set custom_osds_per_node = 4 %}
+
+# MAAS Region+Rack Controller (This VM)
+{% set custom_maas_cpu = "4" %}
+{% set custom_maas_ram = "8GiB" %}
+{% set custom_maas_disk = "30GiB" %}
 
 # Juju Controller Defaults per node
 {% set custom_juju_cpu = "6" %}
@@ -147,7 +151,6 @@
 {% set os_neutron_bridge = meta.get("os_neutron_bridge") or custom_os_neutron_bridge %}
 
 {% set ha_nodes = meta.get("ha_nodes") | default(custom_ha_nodes, true) | int %}
-{% set az_names = meta.get("az_names") or custom_az_names %}
 {% set osds_per_node = meta.get("osds_per_node") | default(custom_osds_per_node, true) | int %}
 
 {% set juju_cpu = meta.get("juju_cpu") or custom_juju_cpu %}
@@ -560,7 +563,6 @@ runcmd:
 - export NODES_DISKS="{{ nodes_disks }}"
 
 - export HA_NODES="{{ ha_nodes }}"
-- export AZ_NAMES="{{ az_names }}"
 - export CLOUD_OSD_DISK="{{ cloud_osd_disk }}"
 - export OSDS_PER_NODE="{{ osds_per_node }}"
 
@@ -866,10 +868,11 @@ runcmd:
 # Create Availability Zones in MAAS
 - |
   echo "\n\n-------- Creating Availability Zones... --------\n"
-  for ZONE in $AZ_NAMES; do
+  for i in $(seq 1 $HA_NODES); do
+    ZONE="AZ$i"
     if ! maas $ADMIN_USER zones read | jq -e ".[] | select(.name==\"$ZONE\")" > /dev/null; then
       echo "Creating zone: $ZONE"
-      maas $ADMIN_USER zones create name="$ZONE"
+      maas $ADMIN_USER zones create name="$ZONE" description="Auto-generated AZ for HA Node $i"
     else
       echo "Zone $ZONE already exists."
     fi
@@ -881,16 +884,13 @@ runcmd:
   
   LXD_CERT_CONTENT=$(cat $LXD_CERT)
   LXD_KEY_CONTENT=$(cat $LXD_KEY)
-
-  NUM_AZS=$(echo "$AZ_NAMES" | awk '{print NF}')
   
-  node_idx=0
   for HOST in $NODES_HOSTNAMES; do
     MAC=$(lxc config get $HOST volatile.eth0.hwaddr)
     SYSTEM_ID=$(maas $ADMIN_USER machines read mac_address=$MAC | jq -r '.[0].system_id')
 
-    AZ_POS=$(( (node_idx % NUM_AZS) + 1 ))
-    TARGET_ZONE=$(echo "$AZ_NAMES" | cut -d' ' -f$AZ_POS)
+    NODE_NUM=$(echo "$HOST" | awk -F'-' '{print $NF}')
+    TARGET_ZONE="AZ${NODE_NUM}"
     
     # Force the MAAS hostname, domain, and explicit LXD power controls
     maas $ADMIN_USER machine update $SYSTEM_ID \
@@ -903,8 +903,6 @@ runcmd:
       power_parameters_key="$LXD_KEY_CONTENT" \
       power_parameters_instance_name="$HOST" \
       power_parameters_project="$LXD_PROJECT"
-    
-    node_idx=$((node_idx + 1))
   done
 
 # Commission machines
