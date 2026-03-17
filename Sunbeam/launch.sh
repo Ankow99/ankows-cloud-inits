@@ -269,7 +269,7 @@ if [ "$NO_NEST" = true ]; then
         # Using random bridge, create it and obtain CIDR
         confirm_or_abort "    Create new random bridge '$LXD_BRIDGE' to auto-assign CIDR?"
         
-        echo "    Creating random managed non-DHCP + NAT MAAS bridge '$LXD_BRIDGE'...${NC}"
+        echo "    Creating random managed non-DHCP + NAT MAAS bridge '$LXD_BRIDGE'..."
         if ! lxc network create "$LXD_BRIDGE" ipv4.nat=true ipv4.dhcp=false ipv6.address=none; then
             echo -e "${BRED}Fatal Error: Failed to create random LXD bridge '$LXD_BRIDGE'. Exiting.${NC}"
             exit 1
@@ -279,15 +279,15 @@ if [ "$NO_NEST" = true ]; then
         
         AUTO_IP=$(lxc network get "$LXD_BRIDGE" ipv4.address)
         MAAS_CIDR=$(echo "$AUTO_IP" | awk -F'[/.]' '{print $1"."$2"."$3".0/"$5}')
-        echo -e "  ${BYELLOW}-> Auto-assigned Host's MAAS Subnet CIDR: ${NC}${MAAS_CIDR}"
+        echo -e "  ${BYELLOW}Auto-assigned Host's MAAS Subnet CIDR: ${NC}${MAAS_CIDR}"
         
     elif lxc network show "$LXD_BRIDGE" >/dev/null 2>&1; then
         # Using existing bridge, obtain CIDR
-        echo -e "  ${BYELLOW}-> Bridge '$LXD_BRIDGE' already exists. Fetching CIDR...${NC}"
+        echo -e "  ${BYELLOW}Bridge '${NC}${LXD_BRIDGE}${BYELLOW}' already exists. Fetching CIDR...${NC}"
 
         AUTO_IP=$(lxc network get "$LXD_BRIDGE" ipv4.address)
         MAAS_CIDR=$(echo "$AUTO_IP" | awk -F'[/.]' '{print $1"."$2"."$3".0/"$5}')
-        echo -e "  ${BYELLOW}-> Fetched Host's MAAS Subnet CIDR: ${NC}${MAAS_CIDR}"
+        echo -e "  ${BYELLOW}Fetched Host's MAAS Subnet CIDR: ${NC}${MAAS_CIDR}"
         
     else
         # Creating new bridge, ask for CIDR
@@ -317,7 +317,7 @@ else
         # Using random bridge, create it
         confirm_or_abort "    Create new random bridge '$HOST_BRIDGE' for nested VM uplink?"
         
-        echo "    Creating random managed DHCP + NAT Host Bridge '$HOST_BRIDGE'...${NC}"
+        echo "    Creating random managed DHCP + NAT Host Bridge '$HOST_BRIDGE'..."
         if ! lxc network create "$HOST_BRIDGE" ipv4.nat=true ipv6.address=none; then
             echo -e "${BRED}Fatal Error: Failed to create random LXD bridge '$HOST_BRIDGE'. Exiting.${NC}"
             exit 1
@@ -327,7 +327,7 @@ else
         
     elif lxc network show "$HOST_BRIDGE" >/dev/null 2>&1; then
         # Using existing bridge
-        echo -e "  ${BYELLOW}-> Bridge '$HOST_BRIDGE' already exists. Using as uplink...${NC}"
+        echo -e "  ${BYELLOW}Bridge '$HOST_BRIDGE' already exists. Using as uplink...${NC}"
     else
         # Creating new bridge
         CREATE_CUSTOM_LXD_BRIDGE=true
@@ -365,7 +365,7 @@ if [ "$NO_NEST" = true ]; then
         # Using random bridge, create it and obtain CIDR
         confirm_or_abort "    Create new random bridge '$NEUTRON_BRIDGE' to auto-assign CIDR?"
         
-        echo "    Creating random managed DHCP + NAT Neutron bridge '$NEUTRON_BRIDGE'...${NC}"
+        echo "    Creating random managed DHCP + NAT Neutron bridge '$NEUTRON_BRIDGE'..."
         if ! lxc network create "$NEUTRON_BRIDGE" ipv4.nat=true ipv4.dhcp=true ipv6.address=none; then
             echo -e "${BRED}Fatal Error: Failed to create random Neutron bridge '$NEUTRON_BRIDGE'. Exiting.${NC}"
             exit 1
@@ -375,15 +375,15 @@ if [ "$NO_NEST" = true ]; then
         
         AUTO_IP=$(lxc network get "$NEUTRON_BRIDGE" ipv4.address)
         NEUTRON_CIDR=$(echo "$AUTO_IP" | awk -F'[/.]' '{print $1"."$2"."$3".0/"$5}')
-        echo -e "  ${BYELLOW}-> Auto-assigned Host's Neutron CIDR: ${NC}${NEUTRON_CIDR}"
+        echo -e "  ${BYELLOW}Auto-assigned Host's Neutron CIDR: ${NC}${NEUTRON_CIDR}"
         
     elif lxc network show "$NEUTRON_BRIDGE" >/dev/null 2>&1; then
         # Using existing bridge, obtain CIDR
-        echo -e "  ${BYELLOW}-> Bridge '$NEUTRON_BRIDGE' already exists. Fetching CIDR...${NC}"
+        echo -e "  ${BYELLOW}Bridge '${NC}${NEUTRON_BRIDGE}${BYELLOW}' already exists. Fetching CIDR...${NC}"
         
         AUTO_IP=$(lxc network get "$NEUTRON_BRIDGE" ipv4.address)
         NEUTRON_CIDR=$(echo "$AUTO_IP" | awk -F'[/.]' '{print $1"."$2"."$3".0/"$5}')
-        echo -e "  ${BYELLOW}-> Fetched Host's Neutron CIDR: ${NC}${NEUTRON_CIDR}"
+        echo -e "  ${BYELLOW}Fetched Host's Neutron CIDR: ${NC}${NEUTRON_CIDR}"
         
     else
         # Creating new bridge, ask for CIDR
