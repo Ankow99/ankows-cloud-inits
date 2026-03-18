@@ -56,7 +56,7 @@
 {% set custom_ha_nodes = 1 %}
 {% set custom_osds_per_node = 4 %}
 
-# MAAS Region+Rack Controller (This VM)
+# MAAS Region+Rack Controller (This VM - not used in this cloud-init)
 {% set custom_maas_cpu = "4" %}
 {% set custom_maas_ram = "8GiB" %}
 {% set custom_maas_disk = "30GiB" %}

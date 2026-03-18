@@ -340,6 +340,10 @@ ask_var "MAAS DNS Forwarder" "maas_dns" "MAAS_DNS"
 ask_var "MAAS Network Space" "maas_space" ""
 ask_var "MAAS Deploy Images (space separated)" "maas_images" ""
 
+if [ "$NO_NEST" = true ]; then
+    ask_var "MAAS Reserved IP Pool Size (IP Count)" "" "DHCP_IP_COUNT" "30"
+fi
+
 if [ "$ACCEPT_DEFAULTS" = false ]; then
     echo ""
     echo -e "${BYELLOW}--- 4. OpenStack Deployment ---${NC}"
@@ -398,6 +402,9 @@ if [ "$NO_NEST" = true ]; then
         CREATE_CUSTOM_NEUTRON_BRIDGE=true
     fi
     LXC_OPTIONAL_ARGS+=("-c" "user.os_neutron_cidr=$NEUTRON_CIDR")
+
+    ask_var "OpenStack Internal API Pool Size (IP Count)" "" "INT_API_IP_COUNT" "50"
+    ask_var "OpenStack Public API Pool Size (IP Count)" "" "PUB_API_IP_COUNT" "50"
 fi
 
 if [ "$ACCEPT_DEFAULTS" = false ]; then
@@ -453,27 +460,41 @@ import ipaddress, sys
 try:
     net = ipaddress.IPv4Network('$MAAS_CIDR', strict=False)
     hosts = list(net.hosts())
-    if len(hosts) < 50:
+    
+    dhcp_count = int('$DHCP_IP_COUNT')
+    int_count  = int('$INT_API_IP_COUNT')
+    pub_count  = int('$PUB_API_IP_COUNT')
+    
+    # Ensure the subnet is large enough to hold the requested IPs + Gateway + Static
+    total_needed = dhcp_count + int_count + pub_count + 5 
+    if len(hosts) < total_needed:
         print('ERROR_TINY')
         sys.exit()
+        
     gw = hosts[0]
     static = hosts[1] # .2 for static binding
-    if len(hosts) >= 255:
-        maas_e, maas_s = hosts[-1], hosts[-55]
-        int_e, int_s = hosts[-56], hosts[-155]
-        pub_e, pub_s = hosts[-156], hosts[-255]
-    else:
-        maas_e, maas_s = hosts[-1], hosts[-10]
-        int_e, int_s = hosts[-11], hosts[-25]
-        pub_e, pub_s = hosts[-26], hosts[2]
+    
+    # Top-Down Allocation Logic
+    maas_e = hosts[-1]
+    maas_s = hosts[-dhcp_count]
+    
+    int_e = hosts[-(dhcp_count + 1)]
+    int_s = hosts[-(dhcp_count + int_count)]
+    
+    pub_e = hosts[-(dhcp_count + int_count + 1)]
+    pub_s = hosts[-(dhcp_count + int_count + pub_count)]
+    
     print(f'{gw} {maas_s} {maas_e} {int_s} {int_e} {pub_s} {pub_e} {net.prefixlen} {static}')
 except Exception:
     print('ERROR')
 ")"
     
     # Abort on MAAS Math Failure
-    if [[ "$RET_GW" == "ERROR"* ]] || [ -z "$RET_GW" ]; then
-        echo -e "${BRED}Fatal Error: Invalid MAAS CIDR ('${NC}${MAAS_CIDR}${BRED}') or subnet too small.${NC}"
+    if [[ "$RET_GW" == "ERROR_TINY"* ]]; then
+        echo -e "${BRED}Fatal Error: Subnet '${NC}${MAAS_CIDR}${BRED}' is too small to fit the requested IP ranges.${NC}"
+        exit 1
+    elif [[ "$RET_GW" == "ERROR"* ]] || [ -z "$RET_GW" ]; then
+        echo -e "${BRED}Fatal Error: Invalid MAAS CIDR ('${NC}${MAAS_CIDR}${BRED}').${NC}"
         exit 1
     fi
     
@@ -648,13 +669,13 @@ echo ""
 echo -e "${BYELLOW}-> 1. Stopping and Deleting LXD VM: $VM_NAME... ${NC}"
 echo ""
 if lxc info "$VM_NAME" >/dev/null 2>&1; then
-    lxc stop -f "$VM_NAME" 2 || true
+    lxc stop -f "$VM_NAME" || true
     sleep 2 # Wait for Ceph/OSD storage locks to release
     lxc delete -f "$VM_NAME"
 else
     echo "VM '$VM_NAME' not found, skipping..."
-    echo ""
 fi
+echo ""
 
 # 2. ONLY purge project if NO_NEST is true AND the project is NOT 'default'
 if [[ "$NO_NEST" == "true" ]]; then
@@ -691,12 +712,11 @@ if [[ "$NO_NEST" == "true" ]]; then
             lxc project delete $LXD_PROJECT
         else
             echo "LXD project '$LXD_PROJECT' not found, skipping..."
-            echo ""
         fi
     else
         echo "Selected '$LXD_PROJECT' LXD project, skipping... (Leaving cleanup to user)"
-        echo ""
     fi
+    echo ""
 fi
 
 # 3. Delete the Host/MAAS Bridge (if we auto-generated it)
@@ -707,8 +727,8 @@ if [ "$CREATED_LXD_BRIDGE" = true ]; then
         lxc network delete "$LXD_BRIDGE_TO_DELETE"
     else
         echo "LXD Bridge '$LXD_BRIDGE_TO_DELETE' not found, skipping..."
-        echo ""
     fi
+    echo ""
 fi
 
 # 4. Delete the Neutron Bridge (if we auto-generated it)
@@ -719,11 +739,12 @@ if [ "$CREATED_NEUTRON_BRIDGE" = true ]; then
         lxc network delete "$NEUTRON_BRIDGE_TO_DELETE"
     else
         echo "Neutron Bridge '$NEUTRON_BRIDGE_TO_DELETE' not found, skipping..."
-        echo ""
     fi
+    echo ""
 fi
 
 echo -e "${BYELLOW}----- Cleanup Complete -----${NC}"
+
 # rm -- "\$0" # Self-deletion removed for auditing purposes.
 EOF
 
