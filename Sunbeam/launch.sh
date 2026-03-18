@@ -1,8 +1,15 @@
 #!/bin/bash
 
+# ---
+# sunbeam-reproducer launch.sh: A helper script to bootstrap an isolated LXD environment for OpenStack Sunbeam & MAAS deployment.
+# version: 1.0.0
+#
+# Made by: Pablo Gonzalez De Greiff @ Canonical
+# ---
+
 set +e
 
-# --- Configuration & Smart SSH Key Detection ---
+# Smart SSH Key Detection
 if [ -f ~/.ssh/id_ed25519 ]; then
     SSH_ID=~/.ssh/id_ed25519
 elif [ -f ~/.ssh/id_rsa ]; then
@@ -11,27 +18,30 @@ else
     SSH_ID=~/.ssh/id_ed25519 # Fallback default
 fi
 
+# Unified unique deployment ID
+DEPLOY_ID="$(openssl rand -hex 4)"
+
 VM_NAME="sunrepro"
 IMAGE="ubuntu:24.04"
 
+# Directories
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+CERT_DIR="$SCRIPT_DIR/.certs"
 CLOUD_INIT="$SCRIPT_DIR/cloud-init/cloud-config.yaml"
-
-CURSOR_TOP='\033[H'
-CLEAR_REST='\033[J'
-CLR_EOL=$'\033[K'
-
-NO_NEST=false
-ACCEPT_DEFAULTS=false
 
 # Array to hold dynamic LXD and Jinja flags
 LXC_OPTIONAL_ARGS=()
 
-# Generate the random bridges: specific prefix + 8 hex chars
-RANDOM_MAAS_BRIDGE="mbr-$(openssl rand -hex 4)"
-RANDOM_NEU_BRIDGE="nbr-$(openssl rand -hex 4)"
-
+# Deployment variables
+NESTED=false
+ACCEPT_DEFAULTS=false
+CLEANUP_HANDOVER=false
 MAX_WAIT=120 # Maximum wait time in minutes for loops
+
+# Juju status printing variables
+CURSOR_TOP='\033[H'
+CLEAR_REST='\033[J'
+CLR_EOL=$'\033[K'
 
 # --- Colors ---
 # Check if stderr is a TTY
@@ -45,7 +55,46 @@ else
     NC=''
 fi
 
-# --- Split combined short flags (e.g. -nd -> -n -d) ---
+show_help() {
+    echo -e "$(cat << EOF
+${BYELLOW}Sunbeam LXD Deployment Automation${NC}
+Usage: $0 [OPTIONS] [VM_NAME]
+
+Bootstraps an isolated LXD environment for OpenStack Sunbeam & MAAS deployment.
+
+${BYELLOW}Options:${NC}
+  -h, --help                Show this help message and exit.
+  -a, --accept-defaults     Bypass interactive prompts and accept all defaults.
+  -n, --nested              Deploy using a nested LXD architecture (default is non-nested).
+  -d, --deb                 Use DEB packages for MAAS instead of the default snap.
+  --lp <launchpad_id>       Import SSH public keys directly from a Launchpad account.
+
+${BYELLOW}Arguments:${NC}
+  VM_NAME                   Optional custom name for the primary LXD VM (default: sunrepro).
+
+${BYELLOW}Example:${NC}
+  $0 -a -n custom-sunbeam-vm
+
+EOF
+    )"
+    exit 0
+}
+
+# Check for cloud-init file
+if [ ! -f "$CLOUD_INIT" ]; then
+    echo -e "${BRED}Error: '${NC}${CLOUD_INIT}${BRED}' not found! ${NC}"
+    exit 1
+fi
+
+# Check for dependencies
+for cmd in jq openssl; do
+    if ! command -v "$cmd" &> /dev/null; then
+        echo -e "${BRED}Error: '${NC}${cmd}${BRED}' is not installed. Please install it.${NC}"
+        exit 1
+    fi
+done
+
+# Split combined short flags (e.g. -nd -> -n -d)
 parsed_args=()
 for arg in "$@"; do
     if [[ "$arg" =~ ^-[a-zA-Z]{2,}$ ]]; then
@@ -59,16 +108,20 @@ done
 set -- "${parsed_args[@]}"
 
 # --- Argument Parsing ---
+echo ""
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        -h|--help)
+            show_help
+            ;;
         -a|--accept-defaults)
             echo -e "${BYELLOW}-> Accepting all default template values ${NC}"
             echo ""
             ACCEPT_DEFAULTS=true
             shift 1
             ;;
-        -n|--nn)
-            NO_NEST=true
+        -n|--nested)
+            NESTED=true
             shift 1
             ;;
         -d|--deb)
@@ -78,13 +131,13 @@ while [[ $# -gt 0 ]]; do
             shift 1
             ;;
         --lp)
-            echo -e "${BYELLOW}-> Importing SSH keys from Launchpad${NC} 'lp:$2'"
+            echo -e "${BYELLOW}-> Importing SSH keys from Launchpad:${NC} lp:$2"
             echo ""
             LXC_OPTIONAL_ARGS+=("-c" "user.ssh_import_id=lp:$2")
             shift 2
             ;;
         -*)
-            echo -e "${BRED}Error: Unknown flag '$1' ${NC}"
+            echo -e "${BRED}Error: Unknown flag '${NC}${1}${BRED}' ${NC}"
             exit 1
             ;;
         *)
@@ -94,35 +147,23 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [ "$NO_NEST" = true ]; then
-    echo -e "${BYELLOW}-> Using non nested LXD architecture. ${NC}"
+if [ "$NESTED" = false ]; then
+    echo -e "${BYELLOW}-> Using default non-nested LXD architecture. ${NC}"
     echo ""
     LXC_OPTIONAL_ARGS+=("-c" "user.nested_lxd=false")
 else
-    echo -e "${BYELLOW}-> Using default nested LXD architecture. ${NC}"
+    echo -e "${BYELLOW}-> Using nested LXD architecture${NC} - ${BRED}WARNING: DEGRADED PERFORMANCE IF NOT RUNNING IN BARE METAL${NC}"
     echo ""
     LXC_OPTIONAL_ARGS+=("-c" "user.nested_lxd=true")
 fi
 
-# Check for cloud-init file
-if [ ! -f "$CLOUD_INIT" ]; then
-    echo -e "${BRED}Error: $CLOUD_INIT not found! ${NC}"
-    exit 1
-fi
-
-# Check for dependencies
-for cmd in jq openssl; do
-    if ! command -v "$cmd" &> /dev/null; then
-        echo -e "${BRED}Error: '$cmd' is not installed. Please install it.${NC}"
+# Early custom VM name check
+if [ "$VM_NAME_PROVIDED" = true ]; then
+    if [[ ! "$VM_NAME" =~ ^[a-z0-9][a-z0-9\-]*[a-z0-9]$ ]]; then
+        echo -e "${BRED}Error: Invalid custom VM name '${NC}${VM_NAME}${BRED}'${NC}"
+        echo "LXD instance names must be lowercase alphanumeric and hyphens only (e.g., 'repro-sunbeam-1')."
         exit 1
     fi
-done
-
-# Check VM name
-if [[ ! "$VM_NAME" =~ ^[a-z0-9][a-z0-9\-]*[a-z0-9]$ ]]; then
-    echo -e "${BRED}Error: Invalid VM name '$VM_NAME'.${NC}"
-    echo "LXD instance names must be lowercase alphanumeric and hyphens only (e.g., 'repro-sunbeam-1')."
-    exit 1
 fi
 
 # Auto-inject local SSH public key
@@ -135,19 +176,72 @@ fi
 
 # Abort if there's neither a local key nor a Launchpad ID
 if [[ ! " ${LXC_OPTIONAL_ARGS[*]} " == *"user.ssh_key"* ]] && [[ ! " ${LXC_OPTIONAL_ARGS[*]} " == *"user.ssh_import_id"* ]]; then
-    echo -e "${BRED}Warning: No SSH keys found (${NC}${SSH_ID}.pub${BRED}) and no Launchpad ID provided!${NC}"
+    echo -e "${BRED}Error: No SSH keys found (${NC}${SSH_ID}.pub${BRED}) and no Launchpad ID provided! Aborting.${NC}"
     echo ""
     exit 1
 fi
 
-# Define SSH options dynamically based on key existence
-if [ -f "$SSH_ID" ]; then
-    SSH_OPTS=(-i "$SSH_ID" -q -o "BatchMode=yes" -o "ConnectTimeout=5" -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null")
-    SSH_INT_OPTS=(-i "$SSH_ID" -q -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null")
-else
-    SSH_OPTS=(-q -o "BatchMode=yes" -o "ConnectTimeout=5" -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null")
-    SSH_INT_OPTS=(-q -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null")
-fi
+# ==========================================
+# HELPER FUNCTIONS
+# ==========================================
+
+emergency_rollback() {
+    # If the script dies before the destroy.sh script is created, clean up the host
+    if [ "$CLEANUP_HANDOVER" = false ]; then
+        
+        if [ "$CREATED_LXD_BRIDGE" = true ] || [ "$CREATED_NEUTRON_BRIDGE" = true ] || [ -n "$PROJ_ARG" ]; then
+            echo -e "\n${BRED}Script interrupted! Performing emergency rollback of orphaned resources...${NC}"
+        fi
+        sleep 5
+        
+        if [ -n "$PROJ_ARG" ] && lxc project list | grep -q " $LXD_PROJECT "; then
+            echo "-> Deleting orphaned LXD project: $LXD_PROJECT"
+            for inst in $(lxc list --project $LXD_PROJECT --format json | jq -r '.[].name'); do
+                lxc stop -f --project $LXD_PROJECT "$inst" || true
+                lxc delete -f --project $LXD_PROJECT "$inst"
+            done
+            
+            for vol in $(lxc storage volume list $POOL_NAME --project $LXD_PROJECT --format json | jq -r '.[] | select(.type=="custom") | .name'); do
+                lxc storage volume delete $POOL_NAME "$vol" --project $LXD_PROJECT
+            done
+            
+            for img in $(lxc image list --project $LXD_PROJECT --format json | jq -r '.[].fingerprint'); do
+                lxc image delete --project $LXD_PROJECT "$img"
+            done
+            
+            lxc project switch default 2>/dev/null
+            lxc project delete $LXD_PROJECT
+        fi
+        
+        if [ "$CREATED_LXD_BRIDGE" = true ] && [ -n "$LXD_BRIDGE_TO_DELETE" ]; then
+            echo "-> Deleting orphaned LXD bridge: $LXD_BRIDGE_TO_DELETE"
+            lxc network delete "$LXD_BRIDGE_TO_DELETE"
+        fi
+        
+        if [ "$CREATED_NEUTRON_BRIDGE" = true ] && [ -n "$NEUTRON_BRIDGE_TO_DELETE" ]; then
+            echo "-> Deleting orphaned Neutron bridge: $NEUTRON_BRIDGE_TO_DELETE"
+            lxc network delete "$NEUTRON_BRIDGE_TO_DELETE"
+        fi
+        
+        if [ -n "$VOLATILE_CERT_NAME" ] && [ -f "$CERT_DIR/${VOLATILE_CERT_NAME}.crt" ]; then
+            echo "-> Cleaning up orphaned certificates..."
+            FINGERPRINT=$(lxc config trust list --format json 2>/dev/null | jq -r ".[] | select(.name==\"${VOLATILE_CERT_NAME}\") | .fingerprint" 2>/dev/null)
+            if [ -n "$FINGERPRINT" ] && [ "$FINGERPRINT" != "null" ]; then
+                lxc config trust remove "$FINGERPRINT"
+            fi
+            rm -f "$CERT_DIR/${VOLATILE_CERT_NAME}.crt" "$CERT_DIR/${VOLATILE_CERT_NAME}.key"
+        fi
+        
+        # Prevent double-execution if multiple exit signals are caught
+        CLEANUP_HANDOVER=true 
+    fi
+}
+
+# Catch normal exits and crashes
+trap emergency_rollback EXIT
+
+# Catch Ctrl+C (INT) and Kill (TERM), run the rollback check, and FORCE an exit
+trap 'emergency_rollback; exit 1' INT TERM
 
 extract_num() {
     local val=$(echo "$1" | sed -E 's/[^0-9]//g')
@@ -227,7 +321,26 @@ ask_var() {
 
 if [ "$ACCEPT_DEFAULTS" = false ]; then
     echo -e "${BYELLOW}--- 1. Authentication & System ---${NC}"
+    echo ""
 fi
+ask_var "Deployment ID" "" "DEPLOY_ID" "$DEPLOY_ID"
+
+# Auto-convert to lowercase to ensure LXD and Linux bridge compatibility
+DEPLOY_ID=$(echo "$DEPLOY_ID" | tr '[:upper:]' '[:lower:]')
+
+if [[ ! "$DEPLOY_ID" =~ ^[a-z0-9]{8}$ ]]; then
+    echo ""
+    echo -e "${BRED}Error: Invalid Deployment ID '${NC}${DEPLOY_ID}${BRED}'${NC}"
+    echo "The Deployment ID must be exactly 8 lowercase letters and/or numbers (no dashes)."
+    exit 1
+fi
+
+# Generate the random resources using the specific prefix + unified ID (8 hex chars)
+RANDOM_MAAS_BRIDGE="mbr-${DEPLOY_ID}"
+RANDOM_NEU_BRIDGE="nbr-${DEPLOY_ID}"
+VOLATILE_CERT_NAME="cert-${DEPLOY_ID}"
+MUX_SOCKET="/tmp/sunbeam_ssh_${DEPLOY_ID}.sock"
+
 ask_var "System User" "user" "SYS_USER"
 ask_var "System Password" "password" ""
 ask_var "Hostname" "hostname" "" "$VM_NAME"
@@ -237,6 +350,7 @@ ask_var "Timezone" "timezone" ""
 if [ "$ACCEPT_DEFAULTS" = false ]; then
     echo ""
     echo -e "${BYELLOW}--- 2. Snap Channels ---${NC}"
+    echo ""
 fi
 ask_var "LXD Channel" "lxd_channel" ""
 ask_var "MAAS Channel" "maas_channel" ""
@@ -245,16 +359,20 @@ ask_var "Sunbeam Channel" "sunbeam_channel" ""
 if [ "$ACCEPT_DEFAULTS" = false ]; then
     echo ""
     echo -e "${BYELLOW}--- 3. LXD & MAAS Base Settings ---${NC}"
+    echo ""
 fi
-# Dynamic LXD Project and Bridge Prompts
-ask_var "LXD Project Name" "lxd_project" "LXD_PROJECT"
+# Unique LXD project
+ask_var "LXD Project Name" "" "LXD_PROJECT" "$(get_default "lxd_project")-${DEPLOY_ID}"
+LXC_OPTIONAL_ARGS+=("-c" "user.lxd_project=$LXD_PROJECT")
+
 ask_var "LXD Storage Pool" "lxd_pool" "POOL_NAME"
 
+# LXD bridge prompts
 CREATED_LXD_BRIDGE=false
 LXD_BRIDGE_TO_DELETE=""
 CREATE_CUSTOM_LXD_BRIDGE=false
 
-if [ "$NO_NEST" = true ]; then
+if [ "$NESTED" = false ]; then
     if [ "$ACCEPT_DEFAULTS" = true ]; then
         LXD_BRIDGE="$RANDOM_MAAS_BRIDGE"
     else
@@ -270,10 +388,14 @@ if [ "$NO_NEST" = true ]; then
         confirm_or_abort "    Create new random bridge '$LXD_BRIDGE' to auto-assign CIDR?"
         
         echo "    Creating random managed non-DHCP + NAT MAAS bridge '$LXD_BRIDGE'..."
-        if ! lxc network create "$LXD_BRIDGE" ipv4.nat=true ipv4.dhcp=false ipv6.address=none; then
-            echo -e "${BRED}Fatal Error: Failed to create random LXD bridge '$LXD_BRIDGE'. Exiting.${NC}"
+        if ! lxc network create "$LXD_BRIDGE" \
+          ipv4.nat=true \
+          ipv4.dhcp=false \
+          ipv6.address=none; then
+            echo -e "${BRED}Error: Failed to create random LXD bridge '${NC}${LXD_BRIDGE}${BRED}'. Exiting.${NC}"
             exit 1
         fi
+        lxc network set "$LXD_BRIDGE" --property description="Sunbeam MAAS Network ($DEPLOY_ID)"
         CREATED_LXD_BRIDGE=true
         LXD_BRIDGE_TO_DELETE="$LXD_BRIDGE"
         
@@ -318,10 +440,13 @@ else
         confirm_or_abort "    Create new random bridge '$HOST_BRIDGE' for nested VM uplink?"
         
         echo "    Creating random managed DHCP + NAT Host Bridge '$HOST_BRIDGE'..."
-        if ! lxc network create "$HOST_BRIDGE" ipv4.nat=true ipv6.address=none; then
+        if ! lxc network create "$HOST_BRIDGE" \
+          ipv4.nat=true \
+          ipv6.address=none; then
             echo -e "${BRED}Fatal Error: Failed to create random LXD bridge '$HOST_BRIDGE'. Exiting.${NC}"
             exit 1
         fi
+        lxc network set "$HOST_BRIDGE" --property description="Sunbeam Nested Uplink ($DEPLOY_ID)"
         CREATED_LXD_BRIDGE=true
         LXD_BRIDGE_TO_DELETE="$HOST_BRIDGE"
         
@@ -340,21 +465,23 @@ ask_var "MAAS DNS Forwarder" "maas_dns" "MAAS_DNS"
 ask_var "MAAS Network Space" "maas_space" ""
 ask_var "MAAS Deploy Images (space separated)" "maas_images" ""
 
-if [ "$NO_NEST" = true ]; then
+if [ "$NESTED" = false ]; then
     ask_var "MAAS Reserved IP Pool Size (IP Count)" "" "DHCP_IP_COUNT" "30"
 fi
 
 if [ "$ACCEPT_DEFAULTS" = false ]; then
     echo ""
     echo -e "${BYELLOW}--- 4. OpenStack Deployment ---${NC}"
+    echo ""
 fi
 ask_var "OpenStack Deployment Name" "os_deployment" ""
 
+# OpenStack bridge prompts
 CREATED_NEUTRON_BRIDGE=false
 NEUTRON_BRIDGE_TO_DELETE=""
 CREATE_CUSTOM_NEUTRON_BRIDGE=false
 
-if [ "$NO_NEST" = true ]; then
+if [ "$NESTED" = false ]; then
     if [ "$ACCEPT_DEFAULTS" = true ]; then
         NEUTRON_BRIDGE="$RANDOM_NEU_BRIDGE"
     else
@@ -370,10 +497,14 @@ if [ "$NO_NEST" = true ]; then
         confirm_or_abort "    Create new random bridge '$NEUTRON_BRIDGE' to auto-assign CIDR?"
         
         echo "    Creating random managed DHCP + NAT Neutron bridge '$NEUTRON_BRIDGE'..."
-        if ! lxc network create "$NEUTRON_BRIDGE" ipv4.nat=true ipv4.dhcp=true ipv6.address=none; then
+        if ! lxc network create "$NEUTRON_BRIDGE" \
+          ipv4.nat=true \
+          ipv4.dhcp=true \
+          ipv6.address=none; then
             echo -e "${BRED}Fatal Error: Failed to create random Neutron bridge '$NEUTRON_BRIDGE'. Exiting.${NC}"
             exit 1
         fi
+        lxc network set "$NEUTRON_BRIDGE" --property description="Sunbeam Neutron Network ($DEPLOY_ID)"
         CREATED_NEUTRON_BRIDGE=true
         NEUTRON_BRIDGE_TO_DELETE="$NEUTRON_BRIDGE"
         
@@ -410,6 +541,7 @@ fi
 if [ "$ACCEPT_DEFAULTS" = false ]; then
     echo ""
     echo -e "${BYELLOW}--- 5. Hardware & Scaling Allocation ---${NC}"
+    echo ""
 fi
 ask_var "Number of HA Nodes (1 or 3+)" "ha_nodes" "HA_NODES"
 
@@ -443,16 +575,12 @@ ask_var "Cloud Node Root Disk" "cloud_disk" "CLOUD_DISK"
 ask_var "Cloud Node OSD Disk (Each)" "cloud_osd_disk" "CLOUD_OSD"
 ask_var "Number of OSDs per Cloud Node" "osds_per_node" "OSDS_PER"
 
-if [ "$ACCEPT_DEFAULTS" = false ]; then
-    echo ""
-fi
-
 # ==========================================
 # RESOURCE CALCULATION
 # ==========================================
 
-# Network Math (Only override if NO_NEST = true)
-if [ "$NO_NEST" = true ]; then
+# Network Math (Only override if NESTED = true)
+if [ "$NESTED" = false ]; then
     
     # 1. MAAS CIDR Calculation
     read -r RET_GW MAAS_S MAAS_E INT_S INT_E PUB_S PUB_E M_MASK STATIC_IP <<< "$(python3 -c "
@@ -523,7 +651,7 @@ except Exception:
     
     # Abort on Neutron Math Failure
     if [ "$NEU_GW" = "ERROR" ] || [ -z "$NEU_GW" ]; then
-        echo -e "${BRED}Fatal Error: Invalid Neutron CIDR ('${NC}${NEUTRON_CIDR}${BRED}').${NC}"
+        echo -e "${BRED}Error: Invalid Neutron CIDR '${NC}${NEUTRON_CIDR}${BRED}'${NC}"
         exit 1
     fi
     
@@ -547,7 +675,7 @@ H_N=$(extract_num "$HA_NODES")
 O_P=$(extract_num "$OSDS_PER")
 
 # Resource Math
-if [ "$NO_NEST" = true ]; then
+if [ "$NESTED" = false ]; then
     CPU_LIMIT="$MAAS_CPU"
     RAM_LIMIT="${M_R}GiB"
     DISK_LIMIT="${M_D}GiB"
@@ -562,11 +690,11 @@ else
 fi
 
 # ==========================================
-# EXECUTION
+# NETWORK CONFIGURATION
 # ==========================================
 
 # Non-nested static IP network configuration
-if [ "$NO_NEST" = true ]; then
+if [ "$NESTED" = false ]; then
     
     # 1. Create custom MAAS bridge if required
     if [ "$CREATE_CUSTOM_LXD_BRIDGE" = true ]; then
@@ -579,10 +707,10 @@ if [ "$NO_NEST" = true ]; then
           ipv4.nat=true \
           ipv4.dhcp=false \
           ipv6.address=none; then
-            echo -e "${BRED}Fatal Error: Failed to create custom MAAS bridge '$LXD_BRIDGE'. Exiting.${NC}"
+            echo -e "${BRED}Error: Failed to create custom MAAS bridge '${NC}${LXD_BRIDGE}${BRED}'. Exiting.${NC}"
             exit 1
         fi
-        
+        lxc network set "$LXD_BRIDGE" --property description="Sunbeam MAAS Network ($DEPLOY_ID)"
         CREATED_LXD_BRIDGE=true
         LXD_BRIDGE_TO_DELETE="$LXD_BRIDGE"
     fi
@@ -598,13 +726,34 @@ if [ "$NO_NEST" = true ]; then
           ipv4.nat=true \
           ipv4.dhcp=true \
           ipv6.address=none; then
-            echo -e "${BRED}Fatal Error: Failed to create custom Neutron bridge '$NEUTRON_BRIDGE'. Exiting.${NC}"
+            echo -e "${BRED}Error: Failed to create custom Neutron bridge '${NC}${NEUTRON_BRIDGE}${BRED}'. Exiting.${NC}"
             exit 1
         fi
-        
+        lxc network set "$LXD_BRIDGE" --property description="Sunbeam Neutron Network ($DEPLOY_ID)"
         CREATED_NEUTRON_BRIDGE=true
         NEUTRON_BRIDGE_TO_DELETE="$NEUTRON_BRIDGE"
     fi
+
+    # 3. Generate and Trust Volatile LXD Certificate
+    echo ""
+    echo -e "${BYELLOW}-> Generating volatile LXD certificate:${NC} ${CERT_DIR}/${VOLATILE_CERT_NAME}"
+    
+    mkdir -p "$CERT_DIR"
+    CLIENT_CRT="$CERT_DIR/${VOLATILE_CERT_NAME}.crt"
+    CLIENT_KEY="$CERT_DIR/${VOLATILE_CERT_NAME}.key"
+    
+    # Generate the cert pair silently
+    openssl req -x509 -newkey rsa:2048 -keyout "$CLIENT_KEY" -out "$CLIENT_CRT" -nodes -days 365 -subj "/CN=${VOLATILE_CERT_NAME}" 2>/dev/null
+    
+    # Trust the cert in the Host's LXD daemon
+    lxc config trust add "$CLIENT_CRT" --name "$VOLATILE_CERT_NAME"
+    
+    # Read contents and base64 encode to safely inject via LXD config
+    CRT_B64=$(base64 -w0 "$CLIENT_CRT")
+    KEY_B64=$(base64 -w0 "$CLIENT_KEY")
+    
+    LXC_OPTIONAL_ARGS+=("-c" "user.lxd_cert_b64=$CRT_B64")
+    LXC_OPTIONAL_ARGS+=("-c" "user.lxd_key_b64=$KEY_B64")
     
     [[ -z "$MAAS_DOMAIN" ]] && MAAS_DOMAIN="maas"
     
@@ -626,7 +775,7 @@ EOF
     
     # Inject static net config and attach to the custom non-nested bridge
     LXC_OPTIONAL_ARGS+=("-c" "cloud-init.network-config=$STATIC_NET")
-    LXC_OPTIONAL_ARGS+=("-d" "eth0,network=$LXD_BRIDGE")
+    LXC_OPTIONAL_ARGS+=("-n" "$LXD_BRIDGE")
 else
     # Create custom LXD bridge if required
     if [ "$CREATE_CUSTOM_LXD_BRIDGE" = true ]; then
@@ -635,18 +784,44 @@ else
         
         echo "  Creating managed DHCP + NAT Host Bridge '$HOST_BRIDGE'..."
         lxc network create "$HOST_BRIDGE" ipv4.nat=true ipv6.address=none
+        lxc network set "$HOST_BRIDGE" --property description="Sunbeam Nested Uplink ($DEPLOY_ID)"
         
         CREATED_LXD_BRIDGE=true
         LXD_BRIDGE_TO_DELETE="$HOST_BRIDGE"
     fi
-    LXC_OPTIONAL_ARGS+=("-d" "eth0,network=$HOST_BRIDGE")
+    LXC_OPTIONAL_ARGS+=("-n" "$HOST_BRIDGE")
+fi
+
+# ==========================================
+# LAUNCH VM
+# ==========================================
+
+# Create LXD Project
+if [ "$LXD_PROJECT" != "default" ]; then
+    if ! lxc project list | grep -q " $LXD_PROJECT "; then
+        echo ""
+        echo -e "${BYELLOW}-> Creating Host LXD Project:${NC} $LXD_PROJECT"
+        echo ""
+        confirm_or_abort "  Create custom LXD project '$LXD_PROJECT'?"
+        
+        # Create project with isolated images and profiles, but shared networks
+        lxc project create "$LXD_PROJECT" -c features.images=true -c features.profiles=true -c features.storage.volumes=true
+        lxc project set "$LXD_PROJECT" --property description="Sunbeam Isolated Environment ($DEPLOY_ID)"
+        
+        # Initialize the blank default profile with a root disk so it can be resized later
+        lxc profile device add default root disk path=/ pool="$POOL_NAME" --project "$LXD_PROJECT"
+    fi
+    PROJ_ARG="--project $LXD_PROJECT"
+else
+    PROJ_ARG=""
 fi
 
 # 1. Launch VM
+echo ""
 echo -e "${BYELLOW}-> 1. Launching LXD VM '${NC}$VM_NAME${BYELLOW}' (${NC}$IMAGE${BYELLOW}) with CPU: ${NC}$CPU_LIMIT${BYELLOW} cores ; RAM: ${NC}$RAM_LIMIT${BYELLOW} ; DISK: ${NC}$DISK_LIMIT"
 echo ""
 
-if ! lxc launch "$IMAGE" "$VM_NAME" --vm \
+if ! lxc launch "$IMAGE" "$VM_NAME" --vm $PROJ_ARG \
   -c limits.cpu="$CPU_LIMIT" \
   -c limits.memory="$RAM_LIMIT" \
   -d root,size="$DISK_LIMIT" \
@@ -656,8 +831,14 @@ if ! lxc launch "$IMAGE" "$VM_NAME" --vm \
     exit 1
 fi
 
+lxc config set "$VM_NAME" $PROJ_ARG --property description="Sunbeam + MAAS Primary Controller ($DEPLOY_ID)"
+
+# ==========================================
+# CLEANUP SCRIPT
+# ==========================================
+
 # 2. Generate Cleanup Script
-CLEANUP_SCRIPT="$SCRIPT_DIR/destroy-${VM_NAME}.sh"
+CLEANUP_SCRIPT="$SCRIPT_DIR/destroy-${VM_NAME}-${DEPLOY_ID}.sh"
 
 cat << EOF > "$CLEANUP_SCRIPT"
 #!/bin/bash
@@ -668,62 +849,60 @@ echo ""
 # 1. Delete the VM
 echo -e "${BYELLOW}-> 1. Stopping and Deleting LXD VM: $VM_NAME... ${NC}"
 echo ""
-if lxc info "$VM_NAME" >/dev/null 2>&1; then
-    lxc stop -f "$VM_NAME" || true
+if lxc info "$VM_NAME" $PROJ_ARG 2>/dev/null; then
+    lxc stop -f "$VM_NAME" $PROJ_ARG || true
     sleep 2 # Wait for Ceph/OSD storage locks to release
-    lxc delete -f "$VM_NAME"
+    lxc delete -f "$VM_NAME" $PROJ_ARG
 else
-    echo "VM '$VM_NAME' not found, skipping..."
+    echo "LXD VM '$VM_NAME' not found, skipping..."
 fi
 echo ""
 
-# 2. ONLY purge project if NO_NEST is true AND the project is NOT 'default'
-if [[ "$NO_NEST" == "true" ]]; then
+# 2. ONLY purge project if the project is NOT 'default'
+echo -e "${BYELLOW}-> 2. Cleaning up dedicated LXD project:${NC} $LXD_PROJECT"
+echo ""
 
-    echo -e "${BYELLOW}-> 2. Cleaning up dedicated LXD project: $LXD_PROJECT... ${NC}"
-    echo ""
-
-    if [[ "$LXD_PROJECT" != "default" ]]; then
-        if lxc project list | grep -q " $LXD_PROJECT "; then
-            
-            # Delete all instances inside the $LXD_PROJECT project first
-            echo "Stopping and deleting all instances in project '$LXD_PROJECT'..."
-            for inst in \$(lxc list --project $LXD_PROJECT --format json | jq -r '.[].name'); do
-                lxc stop -f --project $LXD_PROJECT "\$inst" || true
-                lxc delete -f --project $LXD_PROJECT "\$inst"
-            done
-            
+if [[ "$LXD_PROJECT" != "default" ]]; then
+    if lxc project list | grep -q " $LXD_PROJECT "; then
+        
+        # Delete all instances inside the $LXD_PROJECT project first
+        echo "Stopping and deleting all instances in project '$LXD_PROJECT'..."
+        for inst in \$(lxc list --project $LXD_PROJECT --format json | jq -r '.[].name'); do
+            lxc stop -f --project $LXD_PROJECT "\$inst" || true
             sleep 2 # Wait for Ceph/OSD storage locks to release
-            
-            # Delete all storage volumes inside the $LXD_PROJECT project
-            echo "Deleting storage volumes in project '$LXD_PROJECT'..."
-            for vol in \$(lxc storage volume list $POOL_NAME --project $LXD_PROJECT --format json | jq -r '.[] | select(.type=="custom") | .name'); do
-                lxc storage volume delete $POOL_NAME "\$vol" --project $LXD_PROJECT
-            done
-            
-            # Delete all images inside the $LXD_PROJECT project
-            echo "Deleting images in project '$LXD_PROJECT'..."
-            for img in \$(lxc image list --project $LXD_PROJECT --format json | jq -r '.[].fingerprint'); do
-                lxc image delete --project $LXD_PROJECT "\$img"
-            done
-            
-            # Switch to default to ensure we aren't "inside" the project we are deleting
-            lxc project switch default >/dev/null 2>&1
-            lxc project delete $LXD_PROJECT
-        else
-            echo "LXD project '$LXD_PROJECT' not found, skipping..."
-        fi
+            lxc delete -f --project $LXD_PROJECT "\$inst"
+        done
+        
+        sleep 2 # Buffer to let LXD's database settle before wiping volumes
+        
+        # Delete all storage volumes inside the $LXD_PROJECT project
+        echo "Deleting storage volumes in project '$LXD_PROJECT'..."
+        for vol in \$(lxc storage volume list $POOL_NAME --project $LXD_PROJECT --format json | jq -r '.[] | select(.type=="custom") | .name'); do
+            lxc storage volume delete $POOL_NAME "\$vol" --project $LXD_PROJECT
+        done
+        
+        # Delete all images inside the $LXD_PROJECT project
+        echo "Deleting images in project '$LXD_PROJECT'..."
+        for img in \$(lxc image list --project $LXD_PROJECT --format json | jq -r '.[].fingerprint'); do
+            lxc image delete --project $LXD_PROJECT "\$img"
+        done
+        
+        # Switch to default to ensure we aren't "inside" the project we are deleting
+        lxc project switch default 2>/dev/null
+        lxc project delete $LXD_PROJECT
     else
-        echo "Selected '$LXD_PROJECT' LXD project, skipping... (Leaving cleanup to user)"
+        echo "LXD project '$LXD_PROJECT' not found, skipping..."
     fi
-    echo ""
+else
+    echo "Selected '$LXD_PROJECT' LXD project, skipping... (Leaving cleanup to user)"
 fi
+echo ""
 
 # 3. Delete the Host/MAAS Bridge (if we auto-generated it)
 if [ "$CREATED_LXD_BRIDGE" = true ]; then
-    echo -e "${BYELLOW}-> 3. Deleting unique LXD Bridge: $LXD_BRIDGE_TO_DELETE... ${NC}"
+    echo -e "${BYELLOW}-> 3. Deleting unique LXD Bridge:${NC} $LXD_BRIDGE_TO_DELETE"
     echo ""
-    if lxc network show "$LXD_BRIDGE_TO_DELETE" >/dev/null 2>&1; then
+    if lxc network show "$LXD_BRIDGE_TO_DELETE" 2>/dev/null; then
         lxc network delete "$LXD_BRIDGE_TO_DELETE"
     else
         echo "LXD Bridge '$LXD_BRIDGE_TO_DELETE' not found, skipping..."
@@ -733,13 +912,39 @@ fi
 
 # 4. Delete the Neutron Bridge (if we auto-generated it)
 if [ "$CREATED_NEUTRON_BRIDGE" = true ]; then
-    echo -e "${BYELLOW}-> 4. Deleting unique Neutron Bridge: $NEUTRON_BRIDGE_TO_DELETE... ${NC}"
+    echo -e "${BYELLOW}-> 4. Deleting unique Neutron Bridge:${NC} $NEUTRON_BRIDGE_TO_DELETE"
     echo ""
-    if lxc network show "$NEUTRON_BRIDGE_TO_DELETE" >/dev/null 2>&1; then
+    if lxc network show "$NEUTRON_BRIDGE_TO_DELETE" 2>/dev/null; then
         lxc network delete "$NEUTRON_BRIDGE_TO_DELETE"
     else
         echo "Neutron Bridge '$NEUTRON_BRIDGE_TO_DELETE' not found, skipping..."
     fi
+    echo ""
+fi
+
+# 5. Clean up volatile LXD certificate (non-nested only)
+if [[ "$NESTED" == "false" ]]; then
+    echo -e "${BYELLOW}-> 5. Removing LXD trust for volatile certificate:${NC} ${VOLATILE_CERT_NAME}"
+    echo ""
+    # Fetch the certificate's fingerprint by matching its common name
+    FINGERPRINT=\$(lxc config trust list --format json | jq -r '.[] | select(.name=="${VOLATILE_CERT_NAME}") | .fingerprint')
+    
+    if [ -n "\$FINGERPRINT" ] && [ "\$FINGERPRINT" != "null" ]; then
+        lxc config trust remove "\$FINGERPRINT"
+    else
+        echo "Certificate '${VOLATILE_CERT_NAME}' not found in trust store, skipping..."
+        echo ""
+    fi
+    
+    rm -f "$CERT_DIR/${VOLATILE_CERT_NAME}.crt" "$CERT_DIR/${VOLATILE_CERT_NAME}.key"
+fi
+
+# 6. Clean up SSH Multiplex Socket (if launch.sh was interrupted)
+if [ -S "$MUX_SOCKET" ]; then
+    echo -e "${BYELLOW}-> 6. Cleaning up lingering SSH multiplex socket:${NC} $MUX_SOCKET"
+    # Send exit command to the master process via the socket to kill the background daemon
+    ssh -O exit -o "ControlPath=$MUX_SOCKET" localhost 2>/dev/null
+    rm -f "$MUX_SOCKET"
     echo ""
 fi
 
@@ -750,8 +955,26 @@ EOF
 
 chmod +x "$CLEANUP_SCRIPT"
 
+# Disable the emergency rollback trap because the persistent cleanup script now exists
+CLEANUP_HANDOVER=true
+
 echo ""
 echo -e "${BYELLOW}-> 2. Cleanup script created:${NC} $CLEANUP_SCRIPT"
+
+# ==========================================
+# ESTABLISH SSH CONNECTION
+# ==========================================
+
+# Define SSH options dynamically using SSH Multiplexing (ControlMaster)
+if [ -f "$SSH_ID" ]; then
+    SSH_MASTER_OPTS=(-i "$SSH_ID" -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" -o "ControlMaster=auto" -o "ControlPath=$MUX_SOCKET" -o "ControlPersist=5h")
+    SSH_OPTS=(-q -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" -o "ControlPath=$MUX_SOCKET")
+    SSH_INT_OPTS=(-i "$SSH_ID" -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null")
+else
+    SSH_MASTER_OPTS=(-o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" -o "ControlMaster=auto" -o "ControlPath=$MUX_SOCKET" -o "ControlPersist=5h")
+    SSH_OPTS=(-q -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" -o "ControlPath=$MUX_SOCKET")
+    SSH_INT_OPTS=(-o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null")
+fi
 
 # 3. Watch for IP Address
 echo ""
@@ -764,12 +987,12 @@ TIMEOUT=0
 
 while [ -z "$IP" ]; do
     if [ "$TIMEOUT" -ge "$MAX_WAIT" ]; then
-        echo -e "${BRED}Fatal Error: Timed out waiting for VM to get an IP address.${NC}"
+        echo -e "${BRED}Error: Timed out waiting for VM to get an IP address.${NC}"
         echo -e "Run '${NC}${CLEANUP_SCRIPT}${BYELLOW}' to clean up the environment.${NC}"
         exit 1
     fi
 
-    IP=$(lxc list "$VM_NAME" --format=json | jq -r '.[0].state.network | to_entries[] | select(.key=="eth0" or .key=="enp5s0") | .value.addresses[] | select(.family=="inet" and .scope=="global") | .address' | head -n 1)
+    IP=$(lxc list "$VM_NAME" $PROJ_ARG --format=json | jq -r '.[0].state.network | to_entries[] | select(.key=="eth0" or .key=="enp5s0") | .value.addresses[] | select(.family=="inet" and .scope=="global") | .address' | head -n 1)
 
     if [ -z "$IP" ]; then
         sleep 2
@@ -780,11 +1003,34 @@ done
 echo "Target IP: $IP"
 echo ""
 
-lxc list
+lxc list $PROJ_ARG
 
-# 4. Wait for cloud-init to finish and tail logs and then Juju watch
+# 4. Wait for SSH to become available and establish Master Socket
 echo ""
-echo -e "${BYELLOW}-> 4. Connecting to live Cloud-Init logs... (Will switch to Juju Status) ${NC}"
+echo -e "${BYELLOW}-> 4. Waiting for VM SSH service to start... ${NC}"
+echo ""
+# Native bash TCP check to ensure port 22 is open before attempting SSH
+until timeout 2 bash -c "echo > /dev/tcp/$IP/22" 2>/dev/null; do
+    sleep 2
+done
+sleep 2 # Extra buffer for SSH daemon to fully initialize
+
+echo "  Establishing master SSH connection (Enter key passphrase if prompted)..."
+
+if ! ssh "${SSH_MASTER_OPTS[@]}" "${SYS_USER}@$IP" exit; then
+    echo -e "${BRED}Error: Failed to establish SSH connection. Check your SSH keys or passphrase.${NC}"
+    exit 1
+fi
+
+echo "  Secure SSH multiplex tunnel established!"
+
+# ==========================================
+# LOG TAILING + JUJU STATUS
+# ==========================================
+
+# 5. Wait for cloud-init to finish and tail logs and then Juju watch
+echo ""
+echo -e "${BYELLOW}-> 5. Connecting to live Cloud-Init logs... (Will switch to Juju Status) ${NC}"
 echo ""
 
 PHASE="LOG_TAIL" 
@@ -904,6 +1150,10 @@ while [ "$PHASE" != "DONE" ]; do
     fi
 done
 
+# ==========================================
+# POST_DEPLOYMENT ACTIONS
+# ==========================================
+
 # 6. Open dashboard in browser
 echo ""
 echo -e "${BYELLOW}-> 6. Opening MAAS Dashboard... ${NC}"
@@ -931,10 +1181,21 @@ if command -v xdg-open &> /dev/null; then
     xdg-open "$DASHBOARD_URL" > /dev/null 2>&1 &
 fi
 
+# ==========================================
+# FINAL SSH SHELL
+# ==========================================
+
 # 9. Final Interactive Shell
 echo ""
 echo -e "${BYELLOW}-> 9. Dropping into interactive shell... ${NC}"
 echo ""
+
+# Close the SSH Multiplex Socket
+echo "  Closing background SSH multiplex socket... "
+ssh -O exit -o "ControlPath=$MUX_SOCKET" "${SYS_USER}@$IP" 2>/dev/null
+rm -f "$MUX_SOCKET"
+echo ""
+
 # Force cursor to reappear
 echo -e "\033[?25h"
 ssh "${SSH_INT_OPTS[@]}" "${SYS_USER}@$IP"
