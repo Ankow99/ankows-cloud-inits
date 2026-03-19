@@ -720,17 +720,20 @@ O_D=$(extract_num "$CLOUD_OSD")
 H_N=$(extract_num "$HA_NODES")
 O_P=$(extract_num "$OSDS_PER")
 
-# Resource Math
+# Calculate Total Cluster Footprint
+TOT_CPU=$(( MAAS_CPU + (JUJU_CPU * H_N) + (SUNBEAM_CPU * H_N) + (CLOUD_CPU * H_N) ))
+TOT_RAM=$(( M_R + (J_R * H_N) + (S_R * H_N) + (C_R * H_N) ))
+TOT_DISK=$(( M_D + (J_D * H_N) + (S_D * H_N) + (C_D * H_N) + (O_D * O_P * H_N) + 10 ))
+
+# Primary VM Constraints
 if [ "$NESTED" = false ]; then
+    # In Non-Nested, the Primary VM is just the MAAS server.
     CPU_LIMIT="$MAAS_CPU"
     RAM_LIMIT="${M_R}GiB"
     DISK_LIMIT="${M_D}GiB"
 else
-    # Nested requires ( MAAS + (All Nodes * HA Nodes) + (OSDs * Per Node * HA Nodes) + overhead )
-    CPU_LIMIT=$(( MAAS_CPU + (JUJU_CPU * H_N) + (SUNBEAM_CPU * H_N) + (CLOUD_CPU * H_N) ))
-    TOT_RAM=$(( M_R + (J_R * H_N) + (S_R * H_N) + (C_R * H_N) ))
-    TOT_DISK=$(( M_D + (J_D * H_N) + (S_D * H_N) + (C_D * H_N) + (O_D * O_P * H_N) + 10))
-    
+    # In Nested, the Primary VM must hold MAAS + all nested nodes.
+    CPU_LIMIT="$TOT_CPU"
     RAM_LIMIT="${TOT_RAM}GiB"
     DISK_LIMIT="${TOT_DISK}GiB"
 fi
@@ -743,7 +746,7 @@ if [ "$ACCEPT_DEFAULTS" = false ]; then
     echo ""
     echo -e "${BYELLOW}-> ----- Deployment Summary ----- ${NC}"
     echo ""
-    echo -e "  Project Name:     ${NC}$LXD_PROJECT"
+    echo -e "${BYELLOW}  Project Name:${NC}     $LXD_PROJECT"
     
     if [ "$NESTED" = true ]; then
         echo -e "${BYELLOW}  Architecture:${NC}     Nested"
@@ -758,11 +761,9 @@ if [ "$ACCEPT_DEFAULTS" = false ]; then
         echo -e "${BYELLOW}  OS Network:${NC}       $NEUTRON_BRIDGE ($NEUTRON_CIDR)"
         echo -e "${BYELLOW}    - Gateway:${NC}      $NEUTRON_GW_IP"
     fi
-    echo -e "${BYELLOW}  HA nodes:${NC}         $HA_NODES nodes"
-    echo -e "${BYELLOW}  Total CPU:${NC}        $CPU_LIMIT cores"
-    echo -e "${BYELLOW}  Total CPU:${NC}        $CPU_LIMIT cores"
-    echo -e "${BYELLOW}  Total RAM:${NC}        $RAM_LIMIT"
-    echo -e "${BYELLOW}  Total Disk:${NC}       $DISK_LIMIT"
+    echo -e "${BYELLOW}  HA nodes:${NC}         $H_N nodes"
+    echo -e "${BYELLOW}  Primary VM Size:       ${CPU_LIMIT} cores, ${RAM_LIMIT} RAM, ${DISK_LIMIT} Disk"
+    echo -e "${BYELLOW}  Total Footprint:       ${TOT_CPU} cores, ${TOT_RAM}GiB RAM, ${TOT_DISK}GiB Disk"
     echo ""
     
     confirm_or_abort "Proceed with deployment using these resources and IP ranges?"
