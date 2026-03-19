@@ -22,7 +22,7 @@
 {% set custom_sunbeam_channel = "2024.1/stable" %}
 
 # --- LXD Settings ---
-{% set custom_lxd_project = "sunlxd" %}
+{% set custom_lxd_project = "default" %}
 {% set custom_lxd_bridge = "mbr0" %}
 {% set custom_lxd_pool = "default" %}
 
@@ -30,22 +30,22 @@
 {% set custom_maas_user = "admin" %}
 {% set custom_maas_password = "admin" %}
 {% set custom_maas_email = "admin@mail.com" %}
-{% set custom_maas_gateway = "10.0.0.1" %}
-{% set custom_maas_subnet = "10.0.0.0/22" %}
+{% set custom_maas_gateway = "10.20.0.1" %}
+{% set custom_maas_subnet = "10.20.0.0/22" %}
 {% set custom_maas_dns = "8.8.8.8" %}
-{% set custom_maas_ip_start = "10.0.3.200" %}
-{% set custom_maas_ip_end = "10.0.3.254" %}
+{% set custom_maas_ip_start = "10.20.3.200" %}
+{% set custom_maas_ip_end = "10.20.3.254" %}
 {% set custom_maas_images = "noble" %}
 {% set custom_maas_db_name = "maas_db" %}
 {% set custom_maas_space = "sunspace" %}
 
 # --- OpenStack Networking ---
 {% set custom_os_deployment = "sunbeam" %}
-{% set custom_os_int_api_start = "10.0.3.100" %}
-{% set custom_os_int_api_end = "10.0.3.199" %}
-{% set custom_os_pub_api_start = "10.0.3.0" %}
-{% set custom_os_pub_api_end = "10.0.3.99" %}
-{% set custom_os_neutron_cidr = "10.10.10.0/24" %}
+{% set custom_os_pub_api_start = "10.20.3.0" %}
+{% set custom_os_pub_api_end = "10.20.3.99" %}
+{% set custom_os_int_api_start = "10.20.3.100" %}
+{% set custom_os_int_api_end = "10.20.3.199" %}
+{% set custom_os_neutron_cidr = "10.30.0.0/22" %}
 {% set custom_os_neutron_bridge = "nbr0" %}
 
 # --- Hardware Allocation ---
@@ -79,20 +79,6 @@
 
 # --- Architecture Toggle ---
 {% set custom_nested_lxd = True %}
-
-# ==========================================
-# NESTED OVERRIDES (Used only if nested_lxd = True)
-# ==========================================
-{% set custom_nested_maas_gateway = "10.20.0.1" %}
-{% set custom_nested_maas_subnet = "10.20.0.0/22" %}
-{% set custom_nested_maas_ip_start = "10.20.3.200" %}
-{% set custom_nested_maas_ip_end = "10.20.3.254" %}
-
-{% set custom_nested_os_pub_api_start = "10.20.3.0" %}
-{% set custom_nested_os_pub_api_end = "10.20.3.99" %}
-{% set custom_nested_os_int_api_start = "10.20.3.100" %}
-{% set custom_nested_os_int_api_end = "10.20.3.199" %}
-{% set custom_nested_os_neutron_cidr = "10.30.0.0/22" %}
 
 # ==========================================
 # DATASOURCE PARSER (LXD vs Cloud)
@@ -180,39 +166,14 @@
   {% set nested_lxd = (custom_nested_lxd | string | lower == "true") %}
 {% endif %}
 
-# --- Nested overrides variable switcher ---
-{% if nested_lxd %}
-  {% set maas_gateway = meta.get("maas_gateway") or custom_nested_maas_gateway %}
-  {% set maas_subnet = meta.get("maas_subnet") or custom_nested_maas_subnet %}
-  {% set maas_ip_start = meta.get("maas_ip_start") or custom_nested_maas_ip_start %}
-  {% set maas_ip_end = meta.get("maas_ip_end") or custom_nested_maas_ip_end %}
-  
-  {% set os_pub_api_start = meta.get("os_pub_api_start") or custom_nested_os_pub_api_start %}
-  {% set os_pub_api_end = meta.get("os_pub_api_end") or custom_nested_os_pub_api_end %}
-  {% set os_int_api_start = meta.get("os_int_api_start") or custom_nested_os_int_api_start %}
-  {% set os_int_api_end = meta.get("os_int_api_end") or custom_nested_os_int_api_end %}
-  {% set os_neutron_cidr = meta.get("os_neutron_cidr") or custom_nested_os_neutron_cidr %}
-{% else %}
-  {% set maas_gateway = meta.get("maas_gateway") or custom_maas_gateway %}
-  {% set maas_subnet = meta.get("maas_subnet") or custom_maas_subnet %}
-  {% set maas_ip_start = meta.get("maas_ip_start") or custom_maas_ip_start %}
-  {% set maas_ip_end = meta.get("maas_ip_end") or custom_maas_ip_end %}
-  
-  {% set os_pub_api_start = meta.get("os_pub_api_start") or custom_os_pub_api_start %}
-  {% set os_pub_api_end = meta.get("os_pub_api_end") or custom_os_pub_api_end %}
-  {% set os_int_api_start = meta.get("os_int_api_start") or custom_os_int_api_start %}
-  {% set os_int_api_end = meta.get("os_int_api_end") or custom_os_int_api_end %}
-  {% set os_neutron_cidr = meta.get("os_neutron_cidr") or custom_os_neutron_cidr %}
-{% endif %}
-
-# --- Neutron CIDR fix ---
+# Neutron CIDR fix
 {% set _cidr_parts = os_neutron_cidr.split('/') %}
 {% set _ip_octets = _cidr_parts[0].split('.') %}
 {% set os_neutron_gateway_ip = _ip_octets[0] ~ '.' ~ _ip_octets[1] ~ '.' ~ _ip_octets[2] ~ '.1' %}
 {% set os_neutron_prefix = _cidr_parts[1] %}
 
 # ==========================================
-# DYNAMIC NODE GENERATOR
+# DYNAMIC HA NODE GENERATOR
 # ==========================================
 
 {% set hostnames_list = [] %}
@@ -250,7 +211,11 @@
 {% set nodes_rams = rams_list | join(" ") %}
 {% set nodes_disks = disks_list | join(" ") %}
 
-# --- Dynamic Nested Storage Calculation ---
+# ==========================================
+# DYNAMIC STORAGE CALCULATOR
+# ==========================================
+
+# Dynamic Nested Storage Calculation
 {% set ns = namespace(total_storage=0) %}
 {% for disk in nodes_disks.split(' ') %}
   {% set disk_val = disk | replace('GiB', '') | replace('GB', '') | int %}
@@ -393,7 +358,7 @@ write_files:
     Defaults env_keep += "EDITOR"
 
 {% if not nested_lxd and lxd_cert_b64 and lxd_key_b64 %}
-# Non-Nested specific files (Host's LXD Certificates)
+# Non-nested specific files (Host's LXD Certificates)
 - path: /root/snap/lxd/common/config/client.crt
   owner: root:root
   permissions: '0644'
@@ -481,14 +446,13 @@ runcmd:
 # --- LXD Settings ---
 - export LXD_PROJECT="{{ lxd_project }}"
 - export LXD_BRIDGE="{{ lxd_bridge }}"
+- export LXD_POOL="{{ lxd_pool }}"
 {% if nested_lxd %}
 - export LXD_ADDR="${IP_ADDRESS}:8444"
-- export LXD_POOL="default"
 - export LXD_CERT="/root/lxd-local.crt"
 - export LXD_KEY="/root/lxd-local.key"
 {% else %}
 - export LXD_ADDR="{{ maas_gateway }}:8443"
-- export LXD_POOL="{{ lxd_pool }}"
 - export LXD_CERT="/root/snap/lxd/common/config/client.crt"
 - export LXD_KEY="/root/snap/lxd/common/config/client.key"
 {% endif %}
@@ -713,38 +677,8 @@ runcmd:
 
 {% if lxd_project != "default" %}
 
-# Create LXD MAAS project
-- echo "\n\n-------- Creating LXD '$LXD_PROJECT' project... --------\n"
-
-# Added || true so it safely skips if already created on the host
-- lxc project create $LXD_PROJECT || true
-- lxc project switch $LXD_PROJECT
-
-# Configure LXD MAAS project default profile
-- echo "\n\n-------- Configuring '$LXD_PROJECT' project's default profile... --------\n"
-- |
-  cat <<EOF | lxc profile edit default
-  config:
-    limits.cpu: "2"
-    limits.memory: 6GiB
-  description: MAAS Profile - Uses $LXD_BRIDGE as the network device
-  devices:
-    eth0:
-      name: eth0
-      network: $LXD_BRIDGE
-      type: nic
-    root:
-      path: /
-      pool: $LXD_POOL
-      size: 20GiB
-      type: disk
-  name: default
-  EOF
-
-{% else %}
-
-# Using default LXD project
-- echo "\n\n-------- Using '$LXD_PROJECT' LXD project... --------\n"
+# Switch to LXD MAAS project
+- echo "\n\n-------- Switching to LXD '$LXD_PROJECT' project... --------\n"
 
 - lxc project switch $LXD_PROJECT
 
