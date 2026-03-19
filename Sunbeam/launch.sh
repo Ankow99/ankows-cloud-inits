@@ -102,6 +102,19 @@ for cmd in jq openssl python3 lxc; do
     fi
 done
 
+if ! lxc storage list --format json | jq -e 'length > 0' > /dev/null 2>&1; then
+    echo ""
+    echo -e "${BYELLOW}-> LXD appears uninitialized. Running auto-initialization... ${NC}"
+    
+    # Auto-initialize with default loop-backed storage and default network
+    if ! lxd init --auto; then
+        echo -e "${BRED}Error: Failed to auto-initialize LXD. Please run 'lxd init' manually and try again.${NC}"
+        exit 1
+    fi
+    echo ""
+    echo -e "  LXD initialized successfully."
+fi
+
 # Split combined short flags (e.g. -nd -> -n -d)
 parsed_args=()
 for arg in "$@"; do
