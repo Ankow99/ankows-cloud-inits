@@ -119,6 +119,7 @@ else
     # Ensure it is listening on 8443 even if it was previously initialized
     CURRENT_ADDR=$(lxc config get core.https_address)
     if [ -z "$CURRENT_ADDR" ]; then
+        echo ""
         echo -e "${BYELLOW}-> LXD is not listening on the network. Configuring to port 8443... ${NC}"
         lxc config set core.https_address ":8443"
     fi
@@ -745,23 +746,23 @@ if [ "$ACCEPT_DEFAULTS" = false ]; then
     echo -e "  Project Name:     ${NC}$LXD_PROJECT"
     
     if [ "$NESTED" = true ]; then
-        echo -e "  Architecture:     ${NC}Nested"
-        echo -e "  Uplink Bridge:    ${NC}$HOST_BRIDGE"
+        echo -e "${BYELLOW}  Architecture:${NC}     Nested"
+        echo -e "${BYELLOW}  Uplink Bridge:${NC}    $HOST_BRIDGE"
     else
-        echo -e "  Architecture:     ${NC}Non-Nested"
-        echo -e "  MAAS Network:     ${NC}$LXD_BRIDGE ($MAAS_CIDR)"
-        echo -e "    - Gateway:      ${NC}$MAAS_GW_IP"
-        echo -e "    - MAAS PXE:     ${NC}$MAAS_S to $MAAS_E"
-        echo -e "    - OS Int API:   ${NC}$INT_S to $INT_E"
-        echo -e "    - OS Pub API:   ${NC}$PUB_S to $PUB_E"
-        echo -e "  OS Network:       ${NC}$NEUTRON_BRIDGE ($NEUTRON_CIDR)"
-        echo -e "    - Gateway:      ${NC}$NEUTRON_GW_IP"
+        echo -e "${BYELLOW}  Architecture:${NC}     Non-Nested"
+        echo -e "${BYELLOW}  MAAS Network:${NC}     $LXD_BRIDGE ($MAAS_CIDR)"
+        echo -e "${BYELLOW}    - Gateway:${NC}      $MAAS_GW_IP"
+        echo -e "${BYELLOW}    - MAAS PXE:${NC}     $MAAS_S to $MAAS_E"
+        echo -e "${BYELLOW}    - OS Int API:${NC}   $INT_S to $INT_E"
+        echo -e "${BYELLOW}    - OS Pub API:${NC}   $PUB_S to $PUB_E"
+        echo -e "${BYELLOW}  OS Network:${NC}       $NEUTRON_BRIDGE ($NEUTRON_CIDR)"
+        echo -e "${BYELLOW}    - Gateway:${NC}      $NEUTRON_GW_IP"
     fi
-    echo -e "  HA nodes:         ${NC}$CPU_LIMIT nodes"
-    echo -e "  Total CPU:        ${NC}$CPU_LIMIT cores"
-    echo -e "  Total CPU:        ${NC}$CPU_LIMIT cores"
-    echo -e "  Total RAM:        ${NC}$RAM_LIMIT"
-    echo -e "  Total Disk:       ${NC}$DISK_LIMIT"
+    echo -e "${BYELLOW}  HA nodes:${NC}         $HA_NODES nodes"
+    echo -e "${BYELLOW}  Total CPU:${NC}        $CPU_LIMIT cores"
+    echo -e "${BYELLOW}  Total CPU:${NC}        $CPU_LIMIT cores"
+    echo -e "${BYELLOW}  Total RAM:${NC}        $RAM_LIMIT"
+    echo -e "${BYELLOW}  Total Disk:${NC}       $DISK_LIMIT"
     echo ""
     
     confirm_or_abort "Proceed with deployment using these resources and IP ranges?"
