@@ -111,8 +111,17 @@ if ! lxc storage list --format json | jq -e 'length > 0' > /dev/null 2>&1; then
         echo -e "${BRED}Error: Failed to auto-initialize LXD. Please run 'lxd init' manually and try again.${NC}"
         exit 1
     fi
+    echo -e "  Configuring LXD to listen on port 8443..."
+    lxc config set core.https_address ":8443"
     echo ""
     echo -e "  LXD initialized successfully."
+else
+    # Ensure it is listening on 8443 even if it was previously initialized
+    CURRENT_ADDR=$(lxc config get core.https_address)
+    if [ -z "$CURRENT_ADDR" ]; then
+        echo -e "${BYELLOW}-> LXD is not listening on the network. Configuring to port 8443... ${NC}"
+        lxc config set core.https_address ":8443"
+    fi
 fi
 
 # Split combined short flags (e.g. -nd -> -n -d)
