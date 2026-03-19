@@ -726,6 +726,39 @@ else
 fi
 
 # ==========================================
+# FINAL RESOURCE CONFIRMATION
+# ==========================================
+
+if [ "$ACCEPT_DEFAULTS" = false ]; then
+    echo ""
+    echo -e "${BYELLOW}-> ----- Deployment Summary ----- ${NC}"
+    echo ""
+    echo -e "  Project Name:     ${NC}$LXD_PROJECT"
+    
+    if [ "$NESTED" = true ]; then
+        echo -e "  Architecture:     ${NC}Nested"
+        echo -e "  Uplink Bridge:    ${NC}$HOST_BRIDGE"
+    else
+        echo -e "  Architecture:     ${NC}Non-Nested"
+        echo -e "  MAAS Network:     ${NC}$LXD_BRIDGE ($MAAS_CIDR)"
+        echo -e "    - Gateway:      ${NC}$MAAS_GW_IP"
+        echo -e "    - MAAS PXE:     ${NC}$MAAS_S to $MAAS_E"
+        echo -e "    - OS Int API:   ${NC}$INT_S to $INT_E"
+        echo -e "    - OS Pub API:   ${NC}$PUB_S to $PUB_E"
+        echo -e "  OS Network:       ${NC}$NEUTRON_BRIDGE ($NEUTRON_CIDR)"
+        echo -e "    - Gateway:      ${NC}$NEUTRON_GW_IP"
+    fi
+    echo -e "  HA nodes:         ${NC}$CPU_LIMIT nodes"
+    echo -e "  Total CPU:        ${NC}$CPU_LIMIT cores"
+    echo -e "  Total CPU:        ${NC}$CPU_LIMIT cores"
+    echo -e "  Total RAM:        ${NC}$RAM_LIMIT"
+    echo -e "  Total Disk:       ${NC}$DISK_LIMIT"
+    echo ""
+    
+    confirm_or_abort "Proceed with deployment using these resources and IP ranges?"
+fi
+
+# ==========================================
 # NETWORK CONFIGURATION
 # ==========================================
 
