@@ -762,8 +762,8 @@ if [ "$ACCEPT_DEFAULTS" = false ]; then
         echo -e "${BYELLOW}    - Gateway:${NC}      $NEUTRON_GW_IP"
     fi
     echo -e "${BYELLOW}  HA nodes:${NC}         $H_N nodes"
-    echo -e "${BYELLOW}  Primary VM Size:       ${CPU_LIMIT} cores, ${RAM_LIMIT} RAM, ${DISK_LIMIT} Disk"
-    echo -e "${BYELLOW}  Total Footprint:       ${TOT_CPU} cores, ${TOT_RAM}GiB RAM, ${TOT_DISK}GiB Disk"
+    echo -e "${BYELLOW}  Primary VM Size:${NC}  ${CPU_LIMIT} cores, ${RAM_LIMIT} RAM, ${DISK_LIMIT} Disk"
+    echo -e "${BYELLOW}  Total Footprint:${NC}  ${TOT_CPU} cores, ${TOT_RAM}GiB RAM, ${TOT_DISK}GiB Disk"
     echo ""
     
     confirm_or_abort "Proceed with deployment using these resources and IP ranges?"
