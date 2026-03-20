@@ -742,6 +742,24 @@ fi
 # FINAL RESOURCE CONFIRMATION
 # ==========================================
 
+# Fetch Host Resources
+HOST_CPU=$(nproc 2>/dev/null || echo 0)
+# Convert Kb to GiB and round to nearest whole number
+HOST_RAM=$(awk '/MemTotal/ {printf "%.0f", $2/1024/1024}' /proc/meminfo 2>/dev/null || echo 0)
+
+# Evaluate Constraints
+WARNINGS=""
+DANGER=false
+
+if [ "$HOST_CPU" -gt 0 ] && [ "$TOT_CPU" -gt "$HOST_CPU" ]; then
+    WARNINGS+="${BYELLOW}  ! CPU OVERCOMMIT: Requested ${TOT_CPU} cores, but host only has ${HOST_CPU} cores.${NC}"
+fi
+
+if [ "$HOST_RAM" -gt 0 ] && [ "$TOT_RAM" -gt "$HOST_RAM" ]; then
+    WARNINGS+="${BRED}  ! RAM EXHAUSTION: Requested ${TOT_RAM}GiB, but host only has ${HOST_RAM}GiB total!${NC}"
+    DANGER=true
+fi
+
 if [ "$ACCEPT_DEFAULTS" = false ]; then
     echo ""
     echo -e "${BYELLOW}-> ----- Deployment Summary ----- ${NC}"
@@ -765,8 +783,17 @@ if [ "$ACCEPT_DEFAULTS" = false ]; then
     echo -e "${BYELLOW}  Primary VM Size:${NC}  ${CPU_LIMIT} cores, ${RAM_LIMIT} RAM, ${DISK_LIMIT} Disk"
     echo -e "${BYELLOW}  Total Footprint:${NC}  ${TOT_CPU} cores, ${TOT_RAM}GiB RAM, ${TOT_DISK}GiB Disk"
     echo ""
+    if [ -n "$WARNINGS" ]; then
+        echo -e "\n${BRED}-> ----- RESOURCE WARNINGS ----- ${NC}"
+        echo -e "$WARNINGS"
+        echo ""
+    fi
     
-    confirm_or_abort "Proceed with deployment using these resources and IP ranges?"
+    if [ "$DANGER" = true ]; then
+        confirm_or_abort "${BRED}Host lacks sufficient RAM. Force proceed anyway?${NC}"
+    else
+        confirm_or_abort "Proceed with deployment using these resources and IP ranges?"
+    fi
 fi
 
 # ==========================================
