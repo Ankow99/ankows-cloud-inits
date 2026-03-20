@@ -752,11 +752,11 @@ WARNINGS=""
 DANGER=false
 
 if [ "$HOST_CPU" -gt 0 ] && [ "$TOT_CPU" -gt "$HOST_CPU" ]; then
-    WARNINGS+="${BYELLOW}  ! CPU OVERCOMMIT: Requested ${TOT_CPU} cores, but host only has ${HOST_CPU} cores.${NC}"
+    WARNINGS+="${BYELLOW}  ! CPU OVERCOMMIT: Requested ${TOT_CPU} cores, but host only has ${HOST_CPU} cores.${NC}\n"
 fi
 
 if [ "$HOST_RAM" -gt 0 ] && [ "$TOT_RAM" -gt "$HOST_RAM" ]; then
-    WARNINGS+="${BRED}  ! RAM EXHAUSTION: Requested ${TOT_RAM}GiB, but host only has ${HOST_RAM}GiB total!${NC}"
+    WARNINGS+="${BRED}  ! RAM EXHAUSTION: Requested ${TOT_RAM}GiB, but host only has ${HOST_RAM}GiB total!${NC}\n"
     DANGER=true
 fi
 
@@ -784,7 +784,7 @@ if [ "$ACCEPT_DEFAULTS" = false ]; then
     echo -e "${BYELLOW}  Total Footprint:${NC}  ${TOT_CPU} cores, ${TOT_RAM}GiB RAM, ${TOT_DISK}GiB Disk"
     echo ""
     if [ -n "$WARNINGS" ]; then
-        echo -e "\n${BRED}-> ----- RESOURCE WARNINGS ----- ${NC}"
+        echo -e "${BRED}-> ----- RESOURCE WARNINGS ----- ${NC}"
         echo -e "$WARNINGS"
         echo ""
     fi
