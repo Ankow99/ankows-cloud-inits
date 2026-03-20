@@ -756,37 +756,44 @@ if [ "$HOST_CPU" -gt 0 ] && [ "$TOT_CPU" -gt "$HOST_CPU" ]; then
 fi
 
 if [ "$HOST_RAM" -gt 0 ] && [ "$TOT_RAM" -gt "$HOST_RAM" ]; then
-    WARNINGS+="${BRED}  ! RAM EXHAUSTION: Requested ${TOT_RAM}GiB, but host only has ${HOST_RAM}GiB total!${NC}\n"
+    WARNINGS+="${BRED}  ! RAM EXHAUSTION: Requested ${TOT_RAM} GiB, but host only has ${HOST_RAM} GiB total!${NC}\n"
     DANGER=true
 fi
 
 if [ "$ACCEPT_DEFAULTS" = false ]; then
     echo ""
-    echo -e "${BYELLOW}-> ----- Deployment Summary ----- ${NC}"
+    echo -e "${BYELLOW}-> ---------- Deployment Summary ----------${NC}"
     echo ""
-    echo -e "${BYELLOW}  Project Name:${NC}     $LXD_PROJECT"
+    echo -e "${BYELLOW}  Project Name:${NC}        $LXD_PROJECT"
     
     if [ "$NESTED" = true ]; then
-        echo -e "${BYELLOW}  Architecture:${NC}     Nested"
-        echo -e "${BYELLOW}  Uplink Bridge:${NC}    $HOST_BRIDGE"
+        echo -e "${BYELLOW}  Architecture:${NC}        Nested"
+        echo -e "${BYELLOW}  ---------------- Network ----------------${NC}"
+        echo -e "${BYELLOW}  Uplink Bridge:${NC}       $HOST_BRIDGE"
     else
-        echo -e "${BYELLOW}  Architecture:${NC}     Non-Nested"
-        echo -e "${BYELLOW}  MAAS Network:${NC}     $LXD_BRIDGE ($MAAS_CIDR)"
-        echo -e "${BYELLOW}    - Gateway:${NC}      $MAAS_GW_IP"
-        echo -e "${BYELLOW}    - MAAS PXE:${NC}     $MAAS_S to $MAAS_E"
-        echo -e "${BYELLOW}    - OS Int API:${NC}   $INT_S to $INT_E"
-        echo -e "${BYELLOW}    - OS Pub API:${NC}   $PUB_S to $PUB_E"
-        echo -e "${BYELLOW}  OS Network:${NC}       $NEUTRON_BRIDGE ($NEUTRON_CIDR)"
-        echo -e "${BYELLOW}    - Gateway:${NC}      $NEUTRON_GW_IP"
+        echo -e "${BYELLOW}  Architecture:${NC}        Non-Nested"
+        echo -e "${BYELLOW}  ---------------- Network ----------------${NC}"
+        echo -e "${BYELLOW}  MAAS Network:${NC}        $LXD_BRIDGE ($MAAS_CIDR)"
+        echo -e "${BYELLOW}    - Gateway:${NC}         $MAAS_GW_IP"
+        echo -e "${BYELLOW}    - MAAS PXE:${NC}        $MAAS_S to $MAAS_E"
+        echo -e "${BYELLOW}    - OS Int API:${NC}      $INT_S to $INT_E"
+        echo -e "${BYELLOW}    - OS Pub API:${NC}      $PUB_S to $PUB_E"
+        echo -e "${BYELLOW}  OS Network:${NC}          $NEUTRON_BRIDGE ($NEUTRON_CIDR)"
+        echo -e "${BYELLOW}    - Gateway:${NC}         $NEUTRON_GW_IP"
     fi
-    echo -e "${BYELLOW}  HA nodes:${NC}         $H_N nodes"
-    echo -e "${BYELLOW}  Primary VM Size:${NC}  ${CPU_LIMIT} cores, ${RAM_LIMIT} RAM, ${DISK_LIMIT} Disk"
-    echo -e "${BYELLOW}  Total Footprint:${NC}  ${TOT_CPU} cores, ${TOT_RAM}GiB RAM, ${TOT_DISK}GiB Disk"
+    echo -e "${BYELLOW}  ------------ Node Allocation ------------${NC}"
+    echo -e "${BYELLOW}  HA nodes:${NC}            $H_N nodes"
+    echo -e "${BYELLOW}  1x MAAS Server:${NC}      ${MAAS_CPU} cores, ${M_R}GiB RAM, ${M_D}GiB Disk"
+    echo -e "${BYELLOW}  ${H_N}x Juju Controller:${NC}  ${JUJU_CPU} cores, ${J_R}GiB RAM, ${J_D}GiB Disk (each)"
+    echo -e "${BYELLOW}  ${H_N}x Sunbeam Control:${NC}  ${SUNBEAM_CPU} cores, ${S_R}GiB RAM, ${S_D}GiB Disk (each)"
+    echo -e "${BYELLOW}  ${H_N}x Cloud Compute:${NC}    ${CLOUD_CPU} cores, ${C_R}GiB RAM, ${C_D}GiB Disk + ${O_P}x ${O_D}GiB OSDs (each)"
+    echo -e "${BYELLOW}  --------- Capacity & Constraints --------${NC}"
+    echo -e "${BYELLOW}  Primary VM Size:${NC}     ${CPU_LIMIT} cores, ${RAM_LIMIT} RAM, ${DISK_LIMIT} Disk"
+    echo -e "${BYELLOW}  Total Footprint:${NC}     ${TOT_CPU} cores, ${TOT_RAM}GiB RAM, ${TOT_DISK}GiB Disk"
     echo ""
     if [ -n "$WARNINGS" ]; then
-        echo -e "${BRED}-> ----- RESOURCE WARNINGS ----- ${NC}"
+        echo -e "${BRED}-> ----------- RESOURCE WARNINGS ----------${NC}"
         echo -e "$WARNINGS"
-        echo ""
     fi
     
     if [ "$DANGER" = true ]; then
