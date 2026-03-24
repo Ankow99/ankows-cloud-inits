@@ -769,6 +769,9 @@ runcmd:
       echo "Zone $ZONE already exists."
     fi
   done
+  
+  echo "Assigning Primary MAAS Controller to AZ1..."
+  maas $ADMIN_USER rack-controller update "$PRIMARY_RACK" zone="AZ1"
 
 # Find machines by MAC and set hostnames, domain, and explicit LXD power controls
 - |

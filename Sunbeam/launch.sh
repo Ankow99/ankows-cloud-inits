@@ -27,7 +27,7 @@ fi
 # Unified unique deployment ID
 DEPLOY_ID="$(openssl rand -hex 4)"
 
-VM_NAME="sunbeam-client-1"
+VM_NAME="maas-1"
 IMAGE="ubuntu:24.04"
 
 # Directories
@@ -240,7 +240,8 @@ emergency_rollback() {
     if [ "$CLEANUP_HANDOVER" = false ]; then
         
         if [ "$CREATED_LXD_BRIDGE" = true ] || [ "$CREATED_NEUTRON_BRIDGE" = true ] || [ -n "$LXD_PROJECT" ]; then
-            echo -e "\n${BRED}Script interrupted! Performing emergency rollback of orphaned resources...${NC}"
+            echo ""
+            echo -e "${BRED}Script interrupted! Performing emergency rollback of orphaned resources...${NC}"
         fi
         sleep 5
         
@@ -453,6 +454,8 @@ if [ "$NESTED" = false ]; then
         
     else
         # Creating new bridge, ask for CIDR
+        echo -e "  ${BYELLOW}Bridge '${NC}${LXD_BRIDGE}${BYELLOW}' doesn't exist. Asking for new CIDR...${NC}"
+        
         JINJA_CIDR=$(get_default "maas_subnet")
         if [ "$ACCEPT_DEFAULTS" = true ]; then
             MAAS_CIDR="$JINJA_CIDR"
@@ -568,6 +571,8 @@ if [ "$NESTED" = false ]; then
         
     else
         # Creating new bridge, ask for CIDR
+        echo -e "  ${BYELLOW}Bridge '${NC}${NEUTRON_BRIDGE}${BYELLOW}' doesn't exist. Asking for new CIDR...${NC}"
+        
         JINJA_CIDR=$(get_default "os_neutron_cidr")
         if [ "$ACCEPT_DEFAULTS" = true ]; then
             NEUTRON_CIDR="$JINJA_CIDR"
@@ -721,9 +726,9 @@ H_N=$(extract_num "$HA_NODES")
 O_P=$(extract_num "$OSDS_PER")
 
 # Calculate Total Cluster Footprint
-TOT_CPU=$(( MAAS_CPU + (JUJU_CPU * H_N) + (SUNBEAM_CPU * H_N) + (CLOUD_CPU * H_N) ))
-TOT_RAM=$(( M_R + (J_R * H_N) + (S_R * H_N) + (C_R * H_N) ))
-TOT_DISK=$(( M_D + (J_D * H_N) + (S_D * H_N) + (C_D * H_N) + (O_D * O_P * H_N) + 10 ))
+TOT_CPU=$(( (MAAS_CPU * 1) + (JUJU_CPU * H_N) + (SUNBEAM_CPU * H_N) + (CLOUD_CPU * H_N) ))
+TOT_RAM=$(( (M_R * 1) + (J_R * H_N) + (S_R * H_N) + (C_R * H_N) ))
+TOT_DISK=$(( (M_D * 1) + (J_D * H_N) + (S_D * H_N) + (C_D * H_N) + (O_D * O_P * H_N) + 10 ))
 
 # Primary VM Constraints
 if [ "$NESTED" = false ]; then
@@ -767,11 +772,11 @@ if [ "$ACCEPT_DEFAULTS" = false ]; then
     echo -e "${BYELLOW}  Project Name:${NC}        $LXD_PROJECT"
     
     if [ "$NESTED" = true ]; then
-        echo -e "${BYELLOW}  Architecture:${NC}        Nested"
+        echo -e "${BYELLOW}  Architecture:${NC}        nested (using own LXD)"
         echo -e "${BYELLOW}  -------------------- Network --------------------${NC}"
         echo -e "${BYELLOW}  Uplink Bridge:${NC}       $HOST_BRIDGE"
     else
-        echo -e "${BYELLOW}  Architecture:${NC}        Non-Nested"
+        echo -e "${BYELLOW}  Architecture:${NC}        non-nested (using host's LXD)"
         echo -e "${BYELLOW}  -------------------- Network --------------------${NC}"
         echo -e "${BYELLOW}  MAAS Network:${NC}        $LXD_BRIDGE ($MAAS_CIDR)"
         echo -e "${BYELLOW}    - Gateway:${NC}         $MAAS_GW_IP"
@@ -783,10 +788,10 @@ if [ "$ACCEPT_DEFAULTS" = false ]; then
     fi
     echo -e "${BYELLOW}  ---------------- Node Allocation ----------------${NC}"
     echo -e "${BYELLOW}  HA nodes:${NC}            ${H_N} nodes - ${H_N} availability zones"
-    echo -e "  1${BYELLOW}x MAAS Server:${NC}      ${MAAS_CPU} cores, ${M_R}GiB RAM, ${M_D}GiB Disk (each)"
-    echo -e "  ${H_N}${BYELLOW}x Juju Controller:${NC}  ${JUJU_CPU} cores, ${J_R}GiB RAM, ${J_D}GiB Disk (each)"
-    echo -e "  ${H_N}${BYELLOW}x Sunbeam Control:${NC}  ${SUNBEAM_CPU} cores, ${S_R}GiB RAM, ${S_D}GiB Disk (each)"
-    echo -e "  ${H_N}${BYELLOW}x Cloud Compute:${NC}    ${CLOUD_CPU} cores, ${C_R}GiB RAM, ${C_D}GiB Disk + ${O_P}x ${O_D}GiB OSDs (each)"
+    echo -e "  1x${BYELLOW} MAAS Region+Rack:${NC} ${MAAS_CPU} cores, ${M_R}GiB RAM, ${M_D}GiB Disk (each)"
+    echo -e "  ${H_N}x${BYELLOW} Juju Controller:${NC}  ${JUJU_CPU} cores, ${J_R}GiB RAM, ${J_D}GiB Disk (each)"
+    echo -e "  ${H_N}x${BYELLOW} Sunbeam Control:${NC}  ${SUNBEAM_CPU} cores, ${S_R}GiB RAM, ${S_D}GiB Disk (each)"
+    echo -e "  ${H_N}x${BYELLOW} Cloud Compute:${NC}    ${CLOUD_CPU} cores, ${C_R}GiB RAM, ${C_D}GiB Disk + ${O_P}x ${O_D}GiB OSDs (each)"
     echo -e "${BYELLOW}  ------------- Capacity & Constraints ------------${NC}"
     echo -e "${BYELLOW}  Primary VM Size:${NC}     ${CPU_LIMIT} cores, ${RAM_LIMIT} RAM, ${DISK_LIMIT} Disk"
     echo -e "${BYELLOW}  Total Footprint:${NC}     ${TOT_CPU} cores, ${TOT_RAM}GiB RAM, ${TOT_DISK}GiB Disk"
@@ -951,7 +956,7 @@ if ! lxc launch "$IMAGE" "$VM_NAME" --vm --project "$LXD_PROJECT" \
     exit 1
 fi
 
-lxc config set "$VM_NAME" --project "$LXD_PROJECT" --property description="Sunbeam + MAAS Primary Controller ($DEPLOY_ID)"
+lxc config set "$VM_NAME" --project "$LXD_PROJECT" #--property description="Sunbeam + MAAS Primary Controller ($DEPLOY_ID)"
 
 # ==========================================
 # CLEANUP SCRIPT
@@ -1131,11 +1136,22 @@ lxc list --project "$LXD_PROJECT"
 echo ""
 echo -e "${BYELLOW}-> 4. Waiting for VM SSH service to start... ${NC}"
 echo ""
-# Loop the SSH command to ensure port 22 is open before attempting SSH
-until ssh "${SSH_MASTER_OPTS[@]}" -o ConnectTimeout=2 "${SYS_USER}@$IP" true 2>/dev/null; do
+
+TIMEOUT=0
+
+# Use the LXD API to check the VM's authorized_keys
+until lxc exec "$VM_NAME" --project "$LXD_PROJECT" -- test -s "/home/$SYS_USER/.ssh/authorized_keys" 2>/dev/null; do
+    if [ "$TIMEOUT" -ge "$MAX_WAIT" ]; then
+        echo ""
+        echo -e "${BRED}Error: Timed out waiting for Cloud-Init to inject SSH keys on $VM_NAME.${NC}"
+        echo -e "Run '${NC}${CLEANUP_SCRIPT}${BRED}' to clean up the environment.${NC}"
+        exit 1
+    fi
     sleep 2
+    TIMEOUT=$((TIMEOUT + 2))
 done
-sleep 2 # Extra buffer for SSH daemon to fully initialize
+
+sleep 3 # Small 3-second buffer to ensure the SSH daemon has fully bound to port 22
 
 echo "Establishing master SSH connection (Enter key passphrase if prompted)..."
 
@@ -1271,45 +1287,79 @@ while [ "$PHASE" != "DONE" ]; do
         sleep 3
     fi
 done
+# Force cursor to reappear
+echo -e "\033[?25h"
 
 # ==========================================
 # POST_DEPLOYMENT ACTIONS
 # ==========================================
 
-# 6. Open dashboard in browser
+# 6. Dashboard Access (SSH-Aware)
 echo ""
-echo -e "${BYELLOW}-> 6. Opening MAAS Dashboard... ${NC}"
-
-# Open Browser
-if command -v xdg-open &> /dev/null; then
-    xdg-open "http://$IP:5240/MAAS/" > /dev/null 2>&1 &
-fi
-
-# 7. Obtain Horizon dashboard URL
-echo ""
-echo -e "${BYELLOW}-> 7. Obtaining Horizon Dashboard URL... ${NC}"
+echo -e "${BYELLOW}-> 6. Obtaining Dashboard URLs...${NC}"
 echo ""
 
 DASHBOARD_URL=$(ssh "${SSH_OPTS[@]}" "${SYS_USER}@$IP" "juju status -m openstack horizon | grep -o 'http[s]*://[^ ]*'" 2>/dev/null | head -n 1)
+HORIZON_IP=$(echo "$DASHBOARD_URL" | awk -F'[/:]' '{print $4}')
 
-echo "Horizon Dashboard URL: $DASHBOARD_URL"
+echo -e "${BYELLOW}  MAAS Dashboard:${NC}    http://$IP:5240/MAAS/"
 
-# 8. Open Horizon dashboard in browser
+if [ -n "$DASHBOARD_URL" ]; then
+    echo -e "${BYELLOW}  Horizon Dashboard:${NC} $DASHBOARD_URL"
+fi
 echo ""
-echo -e "${BYELLOW}-> 8. Opening Horizon Dashboard... ${NC}"
 
-# Open Browser
-if command -v xdg-open &> /dev/null; then
-    xdg-open "$DASHBOARD_URL" > /dev/null 2>&1 &
+if [ -n "$SSH_CLIENT" ] || [ -n "$SSH_TTY" ]; then
+    REMOTE_USER=$(whoami)
+    
+    echo -e "${BYELLOW}-> Remote SSH Session Detected!${NC}"
+    echo "To access these dashboards locally, open a new terminal tab on your host and run the respective tunnel command:"
+    echo ""
+    
+    # --- MAAS Tunnel ---
+    echo -e "${BYELLOW}[ MAAS Dashboard ]${NC}"
+    echo -e "${BYELLOW}  Run:${NC} ssh -N -L 5240:$IP:5240 ${REMOTE_USER}@<SERVER_IP>"
+    echo -e "${BYELLOW}  URL:${NC} http://localhost:5240/MAAS/"
+    echo ""
+    
+    # --- Horizon Tunnel ---
+    if [ -n "$HORIZON_IP" ]; then
+        echo -e "${BYELLOW}[ Horizon Dashboard ]${NC}"
+        
+        # In a nested setup, Horizon is on an isolated internal network inside the VM, ProxyJump (-J) is needed to route the tunnel through the primary VM.
+        if [ "$NESTED" = true ]; then
+            echo -e "${BYELLOW}  Note:${NC} Nested architecture requires ProxyJump (-J) to reach internal networks."
+            echo -e "${BYELLOW}  Run:${NC} ssh -N -J ${REMOTE_USER}@<SERVER_IP> ${SYS_USER}@$IP -L 8080:$HORIZON_IP:80"
+        else
+            echo -e "${BYELLOW}  Run:${NC} ssh -N -L 8080:$HORIZON_IP:80 ${REMOTE_USER}@<SERVER_IP>"
+        fi
+        
+        echo -e "${BYELLOW}  URL:${NC} http://localhost:8080"
+        echo ""
+    fi
+    
+    confirm_or_abort "Press Y to continue into the final interactive shell..."
+
+else
+    echo -e "${BYELLOW}-> Local session detected. Opening Dashboards...${NC}"
+    if command -v xdg-open &> /dev/null; then
+        # --- MAAS ---
+        xdg-open "http://$IP:5240/MAAS/" > /dev/null 2>&1 &
+
+        if [ -n "$DASHBOARD_URL" ]; then
+            # --- Horizon ---
+            xdg-open "$DASHBOARD_URL" > /dev/null 2>&1 &
+        fi
+    fi
 fi
 
 # ==========================================
 # FINAL SSH SHELL
 # ==========================================
 
-# 9. Final Interactive Shell
+# 7. Final Interactive Shell
 echo ""
-echo -e "${BYELLOW}-> 9. Dropping into interactive shell... ${NC}"
+echo -e "${BYELLOW}-> 7. Dropping into interactive shell... ${NC}"
 echo ""
 
 # Close the SSH Multiplex Socket
@@ -1318,7 +1368,5 @@ ssh -O exit -o "ControlPath=$MUX_SOCKET" "${SYS_USER}@$IP" 2>/dev/null
 rm -f "$MUX_SOCKET"
 echo ""
 
-# Force cursor to reappear
-echo -e "\033[?25h"
 ssh "${SSH_INT_OPTS[@]}" "${SYS_USER}@$IP"
 
