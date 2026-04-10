@@ -102,6 +102,7 @@ for cmd in jq openssl python3 lxc; do
     fi
 done
 
+# Check for LXD initialization
 if ! lxc storage list --format json | jq -e 'length > 0' > /dev/null 2>&1; then
     echo ""
     echo -e "${BYELLOW}-> LXD appears uninitialized. Running auto-initialization... ${NC}"
@@ -1061,7 +1062,6 @@ else
 fi
 
 rm -f "$CERT_DIR/${VOLATILE_CERT_NAME}.crt" "$CERT_DIR/${VOLATILE_CERT_NAME}.key"
-echo ""
 EOF
 fi
 
@@ -1304,7 +1304,7 @@ HORIZON_IP=$(echo "$DASHBOARD_URL" | awk -F'[/:]' '{print $4}')
 
 echo -e "${BYELLOW}  MAAS Dashboard:${NC}    http://$IP:5240/MAAS/"
 
-if [ -n "$DASHBOARD_URL" ]; then
+if [[ "$HORIZON_IP" =~ ^[a-zA-Z0-9.-]+$ ]]; then
     echo -e "${BYELLOW}  Horizon Dashboard:${NC} $DASHBOARD_URL"
 fi
 echo ""
