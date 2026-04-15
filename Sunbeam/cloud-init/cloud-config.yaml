@@ -29,7 +29,7 @@
 # --- MAAS Networking ---
 {% set custom_maas_user = "admin" %}
 {% set custom_maas_password = "admin" %}
-{% set custom_maas_email = "admin@mail.com" %}
+{% set custom_maas_email = "admin@email.com" %}
 {% set custom_maas_gateway = "10.20.0.1" %}
 {% set custom_maas_subnet = "10.20.0.0/22" %}
 {% set custom_maas_dns = "8.8.8.8" %}
@@ -324,6 +324,7 @@ lxd:
 {% endif %}
 
 write_files:
+# Auto login script helper function (MAAS - LXD - Sunbeam)
 - path: /etc/profile.d/maas-login.sh
   permissions: '0644'
   content: |
@@ -346,6 +347,136 @@ write_files:
             source /home/{{ user }}/sunrc
         fi
     fi
+
+# MAAS Pretty table JSON parser - maast()
+- path: /usr/local/bin/maast
+  permissions: '0755'
+  content: |
+    #!/bin/bash
+    out=$(maas "$@")
+    ret=$?
+
+    if [ $ret -ne 0 ] || [ -z "$out" ] || ! echo "$out" | jq -e . >/dev/null 2>&1; then
+        echo "$out"
+        exit $ret
+    fi
+
+    target="$2"
+
+    # Helper function to align and draw OpenStack-style tables
+    prettify() {
+        python3 -c '
+    import sys
+    # 1. Read input and strip empty lines
+    raw_lines = [line.strip("\n").split("\t") for line in sys.stdin if line.strip("\n")]
+    
+    # 2. Handle completely empty results gracefully
+    if not raw_lines:
+        print("\n[ No records found. ]\n")
+        sys.exit(0)
+    
+    # 3. Remove the legacy dash separator from jq if it exists
+    if len(raw_lines) > 1 and all(cell.replace("-", "").strip() == "" for cell in raw_lines[1]):
+        raw_lines.pop(1)
+        
+    # 4. Catch empty strings and convert to "-" for a solid grid
+    lines = [["-" if cell == "" or cell == "null" else cell for cell in row] for row in raw_lines]
+        
+    # 5. Calculate optimal column widths
+    col_widths = [max(len(str(item)) for item in col) for col in zip(*lines)]
+    
+    def print_sep():
+        print("+" + "+".join("-" * (w + 2) for w in col_widths) + "+")
+        
+    print("")
+    print_sep()
+    # 6. Print headers CENTERED
+    print("| " + " | ".join(str(item).center(w) for item, w in zip(lines[0], col_widths)) + " |")
+    print_sep()
+    
+    # 7. Print data LEFT-ALIGNED
+    for row in lines[1:]:
+        row_ext = row + [""] * (len(col_widths) - len(row))
+        print("| " + " | ".join(str(item).ljust(w) for item, w in zip(row_ext, col_widths)) + " |")
+        
+    print_sep()
+    print("")
+    '
+    }
+
+    case "$target" in
+        machines|machine|nodes|node)
+            echo "$out" | jq -r '(["HOSTNAME", "STATUS", "POWER", "PWR TYPE", "IP ADDRESS", "SYSTEM ID"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.hostname, .status_name, .power_state, (.power_type // "-"), (.ip_addresses[0] // "-"), .system_id]) | @tsv' | prettify
+            ;;
+        block-devices|block-device)
+            echo "$out" | jq -r '(["ID", "NAME", "TYPE", "SIZE", "MODEL", "TAGS"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.id, .name, .type, .size, (.model // "-"), (.tags | join(",") // "-")]) | @tsv' | prettify
+            ;;
+        partitions|partition)
+            echo "$out" | jq -r '(["ID", "PATH", "SIZE", "FSTYPE", "UUID"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.id, .path, .size, (.fstype // "-"), (.uuid // "-")]) | @tsv' | prettify
+            ;;
+        interfaces|interface)
+            echo "$out" | jq -r '(["ID", "NAME", "TYPE", "MAC ADDRESS", "VLAN", "TAGS"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.id, .name, .type, (.mac_address // "-"), (.vlan.vid // "-"), (.tags | join(",") // "-")]) | @tsv' | prettify
+            ;;
+        tags|tag)
+            echo "$out" | jq -r '(["NAME", "COMMENT", "NODES"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.name, (.comment // "-"), (.node_count // "-")]) | @tsv' | prettify
+            ;;
+        subnets|subnet)
+            echo "$out" | jq -r '(["NAME", "CIDR", "GATEWAY", "VLAN", "FABRIC"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.name, .cidr, (.gateway_ip // "-"), .vlan.vid, .vlan.fabric]) | @tsv' | prettify
+            ;;
+        fabrics|fabric)
+            echo "$out" | jq -r '(["ID", "NAME", "CLASS", "DESCRIPTION"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.id, .name, .class_type, (.description // "-")]) | @tsv' | prettify
+            ;;
+        vlans|vlan)
+            echo "$out" | jq -r '(["NAME", "VID", "FABRIC", "DHCP", "SPACE"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.name, .vid, .fabric, .dhcp_on, (.space // "-")]) | @tsv' | prettify
+            ;;
+        spaces|space)
+            echo "$out" | jq -r '(["ID", "NAME", "SUBNETS"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.id, .name, (.subnets | length)]) | @tsv' | prettify
+            ;;
+        ipranges|iprange)
+            echo "$out" | jq -r '(["TYPE", "START IP", "END IP", "COMMENT"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.type, .start_ip, .end_ip, (.comment // "-")]) | @tsv' | prettify
+            ;;
+        domains|domain)
+            echo "$out" | jq -r '(["NAME", "AUTHORITATIVE", "DEFAULT", "TTL"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.name, .authoritative, .is_default, (.ttl // "-")]) | @tsv' | prettify
+            ;;
+        rack-controllers|rack-controller)
+            echo "$out" | jq -r '(["HOSTNAME", "STATUS", "ZONE", "VERSION"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.hostname, .status_name, .zone.name, .version]) | @tsv' | prettify
+            ;;
+        *)
+            echo "$out" | python3 -c '
+    import sys, json
+    try:
+        data = json.load(sys.stdin)
+        if isinstance(data, dict): data = [data]
+        if not data or not isinstance(data, list):
+            print(json.dumps(data, indent=2))
+            sys.exit(0)
+            
+        ignored_suffixes = ("_uri", "_status_name", "_test_status", "_count")
+        
+        keys = []
+        for k, v in data[0].items():
+            if not isinstance(v, (str, int, bool, float)): continue
+            if any(k.endswith(s) for s in ignored_suffixes): continue
+            if k == "id": continue
+            keys.append(k)
+            
+        keys = keys[:6]
+        if not keys:
+            keys = [k for k, v in data[0].items() if isinstance(v, (str, int, bool, float))][:4]
+            
+        if not keys:
+            print(json.dumps(data, indent=2))
+            sys.exit(0)
+            
+        print("\t".join(k.upper().replace("_", " ") for k in keys))
+        print("\t".join("-" * len(k) for k in keys))
+        for item in data:
+            print("\t".join(str(item.get(k, "-")) for k in keys))
+    except Exception:
+        sys.exit(1)
+    ' | prettify || echo "$out" | jq -C .
+            ;;
+    esac
 
 - path: /etc/profile.d/default-editor.sh
   permissions: '0644'
@@ -552,12 +683,12 @@ runcmd:
 - export VLAN_TAG=$(maas $ADMIN_USER subnet read "$MAAS_SUBNET" | jq -r ".vlan.vid")
 - export PRIMARY_RACK=$(maas $ADMIN_USER rack-controllers read | jq -r ".[] | .system_id")
 
-- maas $ADMIN_USER subnet update $MAAS_SUBNET gateway_ip=$MAAS_GATEWAY
-- maas $ADMIN_USER ipranges create type=dynamic start_ip=$MAAS_RESERVED_IP_START end_ip=$MAAS_RESERVED_IP_END
-- maas $ADMIN_USER ipranges create type=reserved start_ip=$OS_INTERNAL_API_IP_START end_ip=$OS_INTERNAL_API_IP_END comment="${OS_DEPLOYMENT_NAME}-internal-api"
-- maas $ADMIN_USER ipranges create type=reserved start_ip=$OS_PUBLIC_API_IP_START end_ip=$OS_PUBLIC_API_IP_END comment="${OS_DEPLOYMENT_NAME}-public-api"
-- maas $ADMIN_USER vlan update $FABRIC_ID $VLAN_TAG dhcp_on=true primary_rack=$PRIMARY_RACK
-- maas $ADMIN_USER maas set-config name=upstream_dns value=$MAAS_DNS
+- maast $ADMIN_USER subnet update $MAAS_SUBNET gateway_ip=$MAAS_GATEWAY
+- maast $ADMIN_USER ipranges create type=dynamic start_ip=$MAAS_RESERVED_IP_START end_ip=$MAAS_RESERVED_IP_END
+- maast $ADMIN_USER ipranges create type=reserved start_ip=$OS_INTERNAL_API_IP_START end_ip=$OS_INTERNAL_API_IP_END comment="${OS_DEPLOYMENT_NAME}-internal-api"
+- maast $ADMIN_USER ipranges create type=reserved start_ip=$OS_PUBLIC_API_IP_START end_ip=$OS_PUBLIC_API_IP_END comment="${OS_DEPLOYMENT_NAME}-public-api"
+- maast $ADMIN_USER vlan update $FABRIC_ID $VLAN_TAG dhcp_on=true primary_rack=$PRIMARY_RACK
+- maast $ADMIN_USER maas set-config name=upstream_dns value=$MAAS_DNS
 
 # Set the MAAS domain name
 - |
@@ -569,16 +700,16 @@ runcmd:
   if [ -n "$EXISTING_DOMAIN_ID" ] && [ "$EXISTING_DOMAIN_ID" != "null" ]; then
     echo "Domain '$MAAS_DOMAIN_NAME' already exists! Setting as default and authoritative..."
     export MAAS_DOMAIN_NAME_ID=$EXISTING_DOMAIN_ID
-    maas $ADMIN_USER domain update $MAAS_DOMAIN_NAME_ID authoritative=true
-    maas $ADMIN_USER domain set-default $MAAS_DOMAIN_NAME_ID
+    maast $ADMIN_USER domain update $MAAS_DOMAIN_NAME_ID authoritative=true
+    maast $ADMIN_USER domain set-default $MAAS_DOMAIN_NAME_ID
   else
     echo "Domain not found. Renaming default domain to '$MAAS_DOMAIN_NAME'..."
     export MAAS_DOMAIN_NAME_ID=$(maas $ADMIN_USER domains read | jq -r '.[] | select(.is_default==true) | .id')
-    maas $ADMIN_USER domain update $MAAS_DOMAIN_NAME_ID name=$MAAS_DOMAIN_NAME authoritative=true
+    maast $ADMIN_USER domain update $MAAS_DOMAIN_NAME_ID name=$MAAS_DOMAIN_NAME authoritative=true
   fi
   
   # Update the rack controller to use the correct domain
-  maas $ADMIN_USER rack-controller update $PRIMARY_RACK domain=$MAAS_DOMAIN_NAME
+  maast $ADMIN_USER rack-controller update $PRIMARY_RACK domain=$MAAS_DOMAIN_NAME
 
 # Add MAAS DNS to host
 - |
@@ -636,6 +767,7 @@ runcmd:
     if [ "$missing_images" = "false" ]; then
       clean_list=$(echo "$requested_releases" | tr '\n' ' ')
       echo "All selected boot images ( $clean_list) are fully synced!"
+      maast $ADMIN_USER boot-resources read
       break
     fi
     
@@ -750,6 +882,7 @@ runcmd:
     if [ "$all_enlisted" = true ]; then
       echo "All VMs have successfully enlisted!\n"
       lxc list
+      sleep 10
       break
     fi
     
@@ -764,14 +897,14 @@ runcmd:
     ZONE="AZ$i"
     if ! maas $ADMIN_USER zones read | jq -e ".[] | select(.name==\"$ZONE\")" > /dev/null; then
       echo "Creating zone: $ZONE"
-      maas $ADMIN_USER zones create name="$ZONE" description="Auto-generated AZ for HA Node $i"
+      maast $ADMIN_USER zones create name="$ZONE" description="Auto-generated AZ for HA Node $i"
     else
       echo "Zone $ZONE already exists."
     fi
   done
   
   echo "Assigning Primary MAAS Controller to AZ1..."
-  maas $ADMIN_USER rack-controller update "$PRIMARY_RACK" zone="AZ1"
+  maast $ADMIN_USER rack-controller update "$PRIMARY_RACK" zone="AZ1"
 
 # Find machines by MAC and set hostnames, domain, and explicit LXD power controls
 - |
@@ -788,7 +921,7 @@ runcmd:
     TARGET_ZONE="AZ${NODE_NUM}"
     
     # Force the MAAS hostname, domain, and explicit LXD power controls
-    maas $ADMIN_USER machine update $SYSTEM_ID \
+    maast $ADMIN_USER machine update $SYSTEM_ID \
       hostname=$HOST \
       domain=$MAAS_DOMAIN_NAME_ID \
       zone=$TARGET_ZONE \
@@ -805,7 +938,7 @@ runcmd:
 - |
   for HOST in $NODES_HOSTNAMES; do
     SYSTEM_ID=$(maas $ADMIN_USER machines read hostname=$HOST | jq -r '.[0].system_id')
-    maas $ADMIN_USER machine commission $SYSTEM_ID
+    maast $ADMIN_USER machine commission $SYSTEM_ID
   done
 
 # Wait for VMs to be ready
@@ -830,6 +963,8 @@ runcmd:
     # If the flag is still true, everyone is ready -> break the loop
     if [ "$all_ready" = true ]; then
       echo "All VMs are Ready!"
+      maast $ADMIN_USER machines read
+      sleep 10
       break
     fi
     
@@ -840,13 +975,13 @@ runcmd:
 # Create tags and add them to commissioned machines
 - echo "\n\n-------- Creating and adding tags... --------\n"
 - |
-  maas $ADMIN_USER tags create name=openstack-${OS_DEPLOYMENT_NAME}
-  maas $ADMIN_USER tags create name=control
-  maas $ADMIN_USER tags create name=compute
-  maas $ADMIN_USER tags create name=storage
-  maas $ADMIN_USER tags create name=network
-  maas $ADMIN_USER tags create name=sunbeam
-  maas $ADMIN_USER tags create name=juju-controller
+  maast $ADMIN_USER tags create name=openstack-${OS_DEPLOYMENT_NAME}
+  maast $ADMIN_USER tags create name=control
+  maast $ADMIN_USER tags create name=compute
+  maast $ADMIN_USER tags create name=storage
+  maast $ADMIN_USER tags create name=network
+  maast $ADMIN_USER tags create name=sunbeam
+  maast $ADMIN_USER tags create name=juju-controller
 
   for HOST in $NODES_HOSTNAMES; do
     SYSTEM_ID=$(maas $ADMIN_USER machines read hostname=$HOST | jq -r '.[0].system_id')
@@ -856,28 +991,28 @@ runcmd:
     
     MAIN_BLOCK_ID=$(maas $ADMIN_USER block-devices read $SYSTEM_ID | jq -r '.[] | select(.serial == "lxd_root" or .name == "sda" or .name == "vda") | .id' | head -n 1)
     if [ -n "$MAIN_BLOCK_ID" ] && [ "$MAIN_BLOCK_ID" != "null" ]; then
-      maas $ADMIN_USER block-device add-tag $SYSTEM_ID $MAIN_BLOCK_ID tag=ssd
-      maas $ADMIN_USER block-device remove-tag $SYSTEM_ID $MAIN_BLOCK_ID tag=rotary
-      maas $ADMIN_USER block-device remove-tag $SYSTEM_ID $MAIN_BLOCK_ID tag=1rpm
+      maast $ADMIN_USER block-device add-tag $SYSTEM_ID $MAIN_BLOCK_ID tag=ssd
+      maast $ADMIN_USER block-device remove-tag $SYSTEM_ID $MAIN_BLOCK_ID tag=rotary
+      maast $ADMIN_USER block-device remove-tag $SYSTEM_ID $MAIN_BLOCK_ID tag=1rpm
     fi
     
     # Base tag for all nodes
-    maas $ADMIN_USER tag update-nodes openstack-${OS_DEPLOYMENT_NAME} add=$SYSTEM_ID
+    maast $ADMIN_USER tag update-nodes openstack-${OS_DEPLOYMENT_NAME} add=$SYSTEM_ID
     
     case "$HOST" in
       juju-controller-*)
-        maas $ADMIN_USER tag update-nodes juju-controller add=$SYSTEM_ID
+        maast $ADMIN_USER tag update-nodes juju-controller add=$SYSTEM_ID
         ;;
         
       sunbeam-controller-*)
-        maas $ADMIN_USER tag update-nodes sunbeam add=$SYSTEM_ID
+        maast $ADMIN_USER tag update-nodes sunbeam add=$SYSTEM_ID
         ;;
         
       cloud-*)
-        maas $ADMIN_USER tag update-nodes control add=$SYSTEM_ID
-        maas $ADMIN_USER tag update-nodes compute add=$SYSTEM_ID
-        maas $ADMIN_USER tag update-nodes storage add=$SYSTEM_ID
-        maas $ADMIN_USER tag update-nodes network add=$SYSTEM_ID
+        maast $ADMIN_USER tag update-nodes control add=$SYSTEM_ID
+        maast $ADMIN_USER tag update-nodes compute add=$SYSTEM_ID
+        maast $ADMIN_USER tag update-nodes storage add=$SYSTEM_ID
+        maast $ADMIN_USER tag update-nodes network add=$SYSTEM_ID
         
         # Tag the ceph osd devices
         echo "\n\n-------- Tagging ceph storage... --------\n"
@@ -886,10 +1021,10 @@ runcmd:
           OSD_BLOCK_ID=$(maas $ADMIN_USER block-devices read $SYSTEM_ID | jq -r '.[] | select(.serial == "lxd_osd'${i}'") | .id')
           
           if [ -n "$OSD_BLOCK_ID" ] && [ "$OSD_BLOCK_ID" != "null" ]; then
-            maas $ADMIN_USER block-device add-tag $SYSTEM_ID $OSD_BLOCK_ID tag=ceph
-            maas $ADMIN_USER block-device add-tag $SYSTEM_ID $OSD_BLOCK_ID tag=ssd
-            maas $ADMIN_USER block-device remove-tag $SYSTEM_ID $OSD_BLOCK_ID tag=rotary
-            maas $ADMIN_USER block-device remove-tag $SYSTEM_ID $OSD_BLOCK_ID tag=1rpm
+            maast $ADMIN_USER block-device add-tag $SYSTEM_ID $OSD_BLOCK_ID tag=ceph
+            maast $ADMIN_USER block-device add-tag $SYSTEM_ID $OSD_BLOCK_ID tag=ssd
+            maast $ADMIN_USER block-device remove-tag $SYSTEM_ID $OSD_BLOCK_ID tag=rotary
+            maast $ADMIN_USER block-device remove-tag $SYSTEM_ID $OSD_BLOCK_ID tag=1rpm
           fi
         done
         
@@ -899,7 +1034,7 @@ runcmd:
         CLOUD_NEUTRON_MAC=$(lxc config get $HOST volatile.eth1.hwaddr)
         CLOUD_NEUTRON_INTERFACE_ID=$(maas $ADMIN_USER interfaces read $SYSTEM_ID | jq -r '.[] | select(.mac_address=="'$CLOUD_NEUTRON_MAC'") | .id')
         if [ -n "$CLOUD_NEUTRON_INTERFACE_ID" ] && [ "$CLOUD_NEUTRON_INTERFACE_ID" != "null" ]; then
-          maas $ADMIN_USER interface update $SYSTEM_ID $CLOUD_NEUTRON_INTERFACE_ID tags=neutron:physnet1
+          maast $ADMIN_USER interface update $SYSTEM_ID $CLOUD_NEUTRON_INTERFACE_ID tags=neutron:physnet1
         fi
         ;;
     esac
@@ -918,8 +1053,8 @@ runcmd:
 # Map network spaces to cloud networks
 - echo "\n\n-------- Mapping network spaces to cloud networks... --------\n"
 
-- maas $ADMIN_USER spaces create name=$MAAS_SPACE
-- maas $ADMIN_USER vlan update $FABRIC_ID $VLAN_TAG space=$MAAS_SPACE
+- maast $ADMIN_USER spaces create name=$MAAS_SPACE
+- maast $ADMIN_USER vlan update $FABRIC_ID $VLAN_TAG space=$MAAS_SPACE
 - $RUN_AS sunbeam deployment space map $MAAS_SPACE
 
 # Validate MAAS provider
