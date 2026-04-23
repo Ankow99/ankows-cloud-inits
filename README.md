@@ -26,12 +26,15 @@ Ensure the following dependencies are installed on the host machine:
 
 ## Usage
 
-Clone the repository to your local machine:
+Clone the repository to your local machine and ensure the synth script is executable:
 
 ```bash
-git clone https://github.com/Ankow99/se-polymerase.git
+git clone [https://github.com/Ankow99/se-polymerase.git](https://github.com/Ankow99/se-polymerase.git)
 cd se-polymerase
+chmod +x synth
 ```
+
+Invoke the script against a cloud-init template:
 
 ```bash
 ./synth [OPTIONS] <CLOUD_INIT_FILE> [DEPLOY_ID]
