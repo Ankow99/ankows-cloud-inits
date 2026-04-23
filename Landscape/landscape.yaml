@@ -1,0 +1,1283 @@
+## template: jinja
+#cloud-config
+
+# ---
+# Landscape transcript: Automated scalable cloud-init install of Landscape HA using MAAS
+# version: 0.1.0
+#
+# Made by: Pablo Gonzalez De Greiff @ Canonical
+# ---
+
+# ==========================================
+# DEFAULT JINJA CONFIGURATIONS
+# ==========================================
+
+# --- Architecture Toggle ---
+{% set custom_nested_lxd = True %}
+{% set custom_maas_snap = True %}
+
+# --- Auth & System ---
+{% set custom_repro_name = "landscape" %}
+{% set custom_vm_name = "maas-1" %}
+{% set custom_vm_image = "ubuntu:24.04" %}
+{% set custom_ssh_key = "" %}
+{% set custom_ssh_import_id = "" %}
+{% set custom_sys_user = "ubuntu" %}                # PROMPT:System User
+{% set custom_password = "ubuntu" %}                # PROMPT:System Password
+{% set custom_pro_token = "" %}                     # PROMPT:Pro Token
+{% set custom_hostname = "" %}                      # PROMPT:Hostname
+{% set custom_tld = "landscape" %}                  # PROMPT:Top Level Domain
+{% set custom_timezone = "America/New_York" %}      # PROMPT:Timezone
+
+# --- Snap Channels ---
+{% set custom_lxd_channel = "5.21/stable" %}                  # PROMPT:LXD Channel
+{% set custom_maas_channel = "3.7/stable" %}                  # PROMPT:MAAS Channel
+{% set custom_juju_channel = "3.6/stable" %}                  # PROMPT:Juju Channel
+{% set custom_haproxy_channel = "latest/stable" %}            # PROMPT:HAProxy Channel
+{% set custom_postgresql_channel = "14/stable" %}             # PROMPT:PostreSQL Channel
+{% set custom_rabbitmq_channel = "3.9/stable" %}              # PROMPT:RabbitMQ Channel
+{% set custom_landscape_server_channel = "latest/stable" %}   # PROMPT:Landscape Server Channel
+{% set custom_landscape_client_channel = "latest/stable" %}   # PROMPT:Landscape Client Channel
+
+# --- LXD Settings ---
+{% set custom_lxd_project = "default" %}
+{% set custom_lxd_pool = "default" %}               # PROMPT:LXD Storage Pool
+
+# --- MAAS Settings ---
+{% set custom_maas_db_name = "maas_db" %}
+{% set custom_maas_user = "admin" %}                # PROMPT:MAAS Admin User
+{% set custom_maas_password = "admin" %}            # PROMPT:MAAS Admin Password
+{% set custom_maas_email = "admin@email.com" %}     # PROMPT:MAAS Admin Email
+{% set custom_maas_images = "noble jammy" %}        # PROMPT:MAAS Deploy Images (space separated)
+{% set custom_maas_dns = "8.8.8.8" %}               # PROMPT:MAAS DNS Forwarder
+{% set custom_maas_bridge = "mbr0" %}               # PROMPT:MAAS Bridge Name [BRIDGE:dhcp=false,cidr=maas_cidr]
+{% set custom_maas_cidr = "10.10.0.0/22" %}
+{% set custom_maas_ip_count = 30 %}                 # PROMPT:MAAS Reserved IP Pool Size
+
+# --- Hardware Allocation ---
+# Total: ( CPU = 22 | RAM = 60GiB | DISK = 310GiB )
+
+# MAAS Controller
+{% set custom_maas_cpu = "4" %}                     # PROMPT:MAAS Server CPU cores
+{% set custom_maas_ram = "8GiB" %}                  # PROMPT:MAAS Server RAM
+{% set custom_maas_disk = "30GiB" %}                # PROMPT:MAAS Server Root Disk
+
+# Juju Controllers per node
+{% set custom_juju_ha = 1 %}                        # PROMPT:Number of Juju Controllers
+{% set custom_juju_cpu = "2" %}                     # PROMPT:Juju Controller CPU cores
+{% set custom_juju_ram = "6GiB" %}                  # PROMPT:Juju Controller RAM
+{% set custom_juju_disk = "20GiB" %}                # PROMPT:Juju Controller Root Disk
+{% set custom_juju_base = "ubuntu@22.04" %}         # PROMPT:Juju Controller Base
+
+# Node Defaults per node
+{% set custom_node_ha = "3" %}                      # PROMPT:Number of Nodes
+{% set custom_node_cpu = "3" %}                     # PROMPT:Node CPU cores
+{% set custom_node_ram = "8GiB" %}                  # PROMPT:Node RAM
+{% set custom_node_disk = "40GiB" %}                # PROMPT:Node Root Disk
+
+# Client Node Defaults per node
+{% set custom_client_ha = "1" %}                    # PROMPT:Number of Client Nodes
+{% set custom_client_cpu = "2" %}                   # PROMPT:Client Node CPU cores
+{% set custom_client_ram = "4GiB" %}                # PROMPT:Client Node RAM
+{% set custom_client_disk = "10GiB" %}              # PROMPT:Client Node Root Disk
+{% set custom_client_base = "ubuntu@22.04" %}       # PROMPT:Client Node Base
+
+# Juju status watch trigger message
+{% set custom_juju_trigger = "-------- Bootstrapping Juju Controller... --------" %}
+
+# ==========================================
+# DATASOURCE PARSER (LXD vs Cloud)
+# ==========================================
+
+{% if cloud_name == "lxd" %}
+  {% set meta = {} %}
+  {% for key, value in ds.config.items() %}
+    {% if key.startswith("user_") %}
+      {% set _ = meta.__setitem__(key[5:], value) %}
+    {% endif %}
+  {% endfor %}
+{% else %}
+  {% set meta = ds.meta_data.get("meta") if ds.meta_data.get("meta") else {} %}
+{% endif %}
+
+# ==========================================
+# VARIABLE BINDINGS
+# ==========================================
+
+{% set ssh_key = meta.get("ssh_key") or custom_ssh_key %}
+{% set ssh_import_id = meta.get("ssh_import_id") or custom_ssh_import_id %}
+{% set sys_user = meta.get("sys_user") or custom_sys_user %}
+{% set password = meta.get("password") or custom_password %}
+{% set pro_token = meta.get("pro_token") or custom_pro_token %}
+{% set hostname_base = meta.get("hostname") or custom_hostname %}
+{% set tld = meta.get("tld") or custom_tld %}
+{% set timezone = meta.get("timezone") or custom_timezone %}
+
+{% set lxd_channel = meta.get("lxd_channel") or custom_lxd_channel %}
+{% set maas_channel = meta.get("maas_channel") or custom_maas_channel %}
+{% set juju_channel = meta.get("juju_channel") or custom_juju_channel %}
+{% set haproxy_channel = meta.get("haproxy_channel") or custom_haproxy_channel %}
+{% set postgresql_channel = meta.get("postgresql_channel") or custom_postgresql_channel %}
+{% set rabbitmq_channel = meta.get("rabbitmq_channel") or custom_rabbitmq_channel %}
+{% set landscape_server_channel = meta.get("landscape_server_channel") or custom_landscape_server_channel %}
+{% set landscape_client_channel = meta.get("landscape_client_channel") or custom_landscape_client_channel %}
+
+{% set lxd_project = meta.get("lxd_project") or custom_lxd_project %}
+{% set lxd_pool = meta.get("lxd_pool") or custom_lxd_pool %}
+{% set lxd_cert_b64 = meta.get("lxd_cert_b64") %}
+{% set lxd_key_b64 = meta.get("lxd_key_b64") %}
+
+{% set maas_db_name = meta.get("maas_db_name") or custom_maas_db_name %}
+{% set maas_user = meta.get("maas_user") or custom_maas_user %}
+{% set maas_password = meta.get("maas_password") or custom_maas_password %}
+{% set maas_email = meta.get("maas_email") or custom_maas_email %}
+{% set maas_images = meta.get("maas_images") or custom_maas_images %}
+{% set maas_dns = meta.get("maas_dns") or custom_maas_dns %}
+{% set maas_bridge = meta.get("maas_bridge") or custom_maas_bridge %}
+{% set maas_cidr = meta.get("maas_cidr") or custom_maas_cidr %}
+{% set maas_ip_count = meta.get("maas_ip_count") | default(custom_maas_ip_count, true) | int %}
+
+{% set juju_ha = meta.get("juju_ha") | default(custom_juju_ha, true) | int %}
+{% set juju_cpu = meta.get("juju_cpu") or custom_juju_cpu %}
+{% set juju_ram = meta.get("juju_ram") or custom_juju_ram %}
+{% set juju_disk = meta.get("juju_disk") or custom_juju_disk %}
+{% set juju_base = meta.get("juju_base") or custom_juju_base %}
+
+{% set node_ha = meta.get("node_ha") | default(custom_node_ha, true) | int %}
+{% set node_cpu = meta.get("node_cpu") or custom_node_cpu %}
+{% set node_ram = meta.get("node_ram") or custom_node_ram %}
+{% set node_disk = meta.get("node_disk") or custom_node_disk %}
+
+{% set client_ha = meta.get("client_ha") | default(custom_client_ha, true) | int %}
+{% set client_cpu = meta.get("client_cpu") or custom_client_cpu %}
+{% set client_ram = meta.get("client_ram") or custom_client_ram %}
+{% set client_disk = meta.get("client_disk") or custom_client_disk %}
+{% set client_base = meta.get("client_base") or custom_client_base %}
+
+{% if meta.get("maas_snap") is not none %}
+  {% set maas_snap = (meta.get("maas_snap") | string | lower == "true") %}
+{% else %}
+  {% set maas_snap = (custom_maas_snap | string | lower == "true") %}
+{% endif %}
+
+{% if meta.get("nested_lxd") is not none %}
+  {% set nested_lxd = (meta.get("nested_lxd") | string | lower == "true") %}
+{% else %}
+  {% set nested_lxd = (custom_nested_lxd | string | lower == "true") %}
+{% endif %}
+
+# ==========================================
+# CIDR GATEWAY AUTO-CALCULATOR
+# ==========================================
+
+{% set _maas_cidr_parts = maas_cidr.split('/') %}
+{% set _maas_ip_octets = _maas_cidr_parts[0].split('.') %}
+{% set maas_gateway = _maas_ip_octets[0] ~ '.' ~ _maas_ip_octets[1] ~ '.' ~ _maas_ip_octets[2] ~ '.1' %}
+{% set maas_prefix = _maas_cidr_parts[1] %}
+
+# ==========================================
+# DYNAMIC HA NODE GENERATOR
+# ==========================================
+
+{% set max_ha = [juju_ha, node_ha, client_ha] | max %}
+
+{% set hostnames_list = [] %}
+{% set cpus_list = [] %}
+{% set rams_list = [] %}
+{% set disks_list = [] %}
+
+# 1. Generate Juju Controllers
+{% for i in range(1, juju_ha + 1) %}
+  {% set _ = hostnames_list.append("juju-controller-" ~ i) %}
+  {% set _ = cpus_list.append(juju_cpu) %}
+  {% set _ = rams_list.append(juju_ram) %}
+  {% set _ = disks_list.append(juju_disk) %}
+{% endfor %}
+
+# 2. Generate Nodes
+{% for i in range(1, node_ha + 1) %}
+  {% set _ = hostnames_list.append("node-" ~ i) %}
+  {% set _ = cpus_list.append(node_cpu) %}
+  {% set _ = rams_list.append(node_ram) %}
+  {% set _ = disks_list.append(node_disk) %}
+{% endfor %}
+
+# 3. Generate Client Nodes
+{% for i in range(1, client_ha + 1) %}
+  {% set _ = hostnames_list.append("client-" ~ i) %}
+  {% set _ = cpus_list.append(client_cpu) %}
+  {% set _ = rams_list.append(client_ram) %}
+  {% set _ = disks_list.append(client_disk) %}
+{% endfor %}
+
+# Compile final strings
+{% set nodes_hostnames = hostnames_list | join(" ") %}
+{% set nodes_cpus = cpus_list | join(" ") %}
+{% set nodes_rams = rams_list | join(" ") %}
+{% set nodes_disks = disks_list | join(" ") %}
+
+# ==========================================
+# DYNAMIC STORAGE CALCULATOR
+# ==========================================
+
+# Dynamic Nested Storage Calculation
+{% set ns = namespace(total_storage=0) %}
+{% for disk in nodes_disks.split(' ') %}
+  {% set disk_val = disk | replace('GiB', '') | replace('GB', '') | int %}
+  {% set ns.total_storage = ns.total_storage + disk_val %}
+{% endfor %}
+
+# Add a 10GB buffer
+{% set final_total = ns.total_storage + 10 %}
+{% set nested_storage = final_total | string ~ 'GiB' %}
+
+# ==========================================
+# STANDARD CLOUD-INIT EXECUTION
+# ==========================================
+
+# Create Hostname / FQDN
+{% set base_name = local_hostname if hostname_base == "" else hostname_base %}
+{% if tld %}
+fqdn: {{ base_name }}.{{ tld }}
+prefer_fqdn_over_hostname: true
+{% else %}
+hostname: {{ base_name }}
+{% endif %}
+
+# Create user and config auth
+users:
+  - name: {{ sys_user }}
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: adm, sys, lxd, sudo
+    shell: /bin/bash
+{% if not ssh_key and not ssh_import_id %}
+    plain_text_passwd: "{{ password }}"
+    lock_passwd: false
+{% endif %}
+{% if ssh_key %}
+    ssh_authorized_keys:
+      - {{ ssh_key }}
+{% endif %}
+{% if ssh_import_id %}
+    ssh_import_id:
+      - {{ ssh_import_id }}
+{% endif %}
+
+# Enable SSH Password Auth ONLY if no keys are provided
+{% if not ssh_key and not ssh_import_id %}
+ssh_pwauth: true
+{% else %}
+ssh_pwauth: false
+{% endif %}
+
+# Config Ubuntu Pro
+{% if pro_token %}
+ubuntu_pro:
+  token: {{ pro_token }}
+{% endif %}
+
+{% if nested_lxd %}
+# If Nested: Seed the LXD database natively via cloud-init
+lxd:
+  preseed: |
+    config:
+      core.https_address: '[::]:8444'
+    networks:
+    - config:
+        ipv4.address: {{ maas_gateway }}/{{ maas_prefix }}
+        ipv4.dhcp: "false"
+        ipv4.nat: "true"
+        ipv6.address: none
+      description: "Non-DHCP NAT bridge for MAAS"
+      name: {{ maas_bridge }}
+      type: bridge
+      project: default
+    storage_pools:
+    - config:
+        size: {{ nested_storage }}
+      description: "Nested ZFS Storage"
+      name: default
+      driver: zfs 
+    profiles:
+    - config:
+        limits.cpu: "2"
+        limits.memory: 6GiB
+      description: "Default LXD profile"
+      devices:
+        eth0:
+          name: eth0
+          network: {{ maas_bridge }}
+          type: nic
+        root:
+          path: /
+          pool: default
+          type: disk
+      name: default
+    projects: []
+    cluster: null
+{% endif %}
+
+write_files:
+- path: /etc/profile.d/maas-login.sh
+  permissions: '0644'
+  content: |
+    if [ "$USER" = "{{ sys_user }}" ]; then
+        ADMIN_USER="{{ maas_user }}"
+        if command -v maas >/dev/null 2>&1 && sudo maas apikey --username $ADMIN_USER >/dev/null 2>&1; then
+            maas login $ADMIN_USER 'http://localhost:5240/MAAS/' $(sudo maas apikey --username $ADMIN_USER) >/dev/null 2>&1
+        fi
+
+        if command -v lxc >/dev/null 2>&1; then
+            {% if not nested_lxd %}
+            lxc remote switch host-lxd >/dev/null 2>&1 || true
+            {% endif %}
+            {% if lxd_project != "default" %}
+            lxc project switch {{ lxd_project }} >/dev/null 2>&1 || true
+            {% endif %}
+        fi
+    fi
+
+# MAAS Pretty table JSON parser - maast()
+- path: /usr/local/bin/maast
+  permissions: '0755'
+  content: |
+    #!/bin/bash
+    out=$(maas "$@")
+    ret=$?
+
+    if [ $ret -ne 0 ] || [ -z "$out" ] || ! echo "$out" | jq -e . >/dev/null 2>&1; then
+        echo "$out"
+        exit $ret
+    fi
+
+    target="$2"
+
+    # Helper function to align and draw OpenStack-style tables
+    prettify() {
+        python3 -c '
+    import sys
+    # 1. Read input and strip empty lines
+    raw_lines = [line.strip("\n").split("\t") for line in sys.stdin if line.strip("\n")]
+    
+    # 2. Handle completely empty results gracefully
+    if not raw_lines:
+        print("\n[ No records found. ]\n")
+        sys.exit(0)
+    
+    # 3. Remove the legacy dash separator from jq if it exists
+    if len(raw_lines) > 1 and all(cell.replace("-", "").strip() == "" for cell in raw_lines[1]):
+        raw_lines.pop(1)
+        
+    # 4. Catch empty strings and convert to "-" for a solid grid
+    lines = [["-" if cell == "" or cell == "null" else cell for cell in row] for row in raw_lines]
+        
+    # 5. Calculate optimal column widths
+    col_widths = [max(len(str(item)) for item in col) for col in zip(*lines)]
+    
+    def print_sep():
+        print("+" + "+".join("-" * (w + 2) for w in col_widths) + "+")
+        
+    print("")
+    print_sep()
+    # 6. Print headers CENTERED
+    print("| " + " | ".join(str(item).center(w) for item, w in zip(lines[0], col_widths)) + " |")
+    print_sep()
+    
+    # 7. Print data LEFT-ALIGNED
+    for row in lines[1:]:
+        row_ext = row + [""] * (len(col_widths) - len(row))
+        print("| " + " | ".join(str(item).ljust(w) for item, w in zip(row_ext, col_widths)) + " |")
+        
+    print_sep()
+    '
+    }
+
+    case "$target" in
+        machines|machine|nodes|node)
+            echo "$out" | jq -r '(["HOSTNAME", "STATUS", "POWER", "PWR TYPE", "IP ADDRESS", "SYSTEM ID"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.hostname, .status_name, .power_state, (.power_type // "-"), (.ip_addresses[0] // "-"), .system_id]) | @tsv' | prettify
+            ;;
+        block-devices|block-device)
+            echo "$out" | jq -r '(["ID", "NAME", "TYPE", "SIZE", "MODEL", "TAGS"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.id, .name, .type, .size, (.model // "-"), (.tags | join(",") // "-")]) | @tsv' | prettify
+            ;;
+        partitions|partition)
+            echo "$out" | jq -r '(["ID", "PATH", "SIZE", "FSTYPE", "UUID"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.id, .path, .size, (.fstype // "-"), (.uuid // "-")]) | @tsv' | prettify
+            ;;
+        interfaces|interface)
+            echo "$out" | jq -r '(["ID", "NAME", "TYPE", "MAC ADDRESS", "VLAN", "TAGS"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.id, .name, .type, (.mac_address // "-"), (.vlan.vid // "-"), (.tags | join(",") // "-")]) | @tsv' | prettify
+            ;;
+        tags|tag)
+            echo "$out" | jq -r '(["NAME", "COMMENT", "NODES"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.name, (.comment // "-"), (.node_count // "-")]) | @tsv' | prettify
+            ;;
+        boot-source-selections|boot-source-selection)
+            echo "$out" | jq -r '(["OS", "RELEASE", "ARCHES", "SUBARCHES", "LABELS"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.os, .release, (.arches | join(",")), (.subarches | join(",")), (.labels | join(","))]) | @tsv' | prettify
+            ;;
+        boot-resources|boot-resource)
+            echo "$out" | jq -r '(["NAME", "ARCHITECTURE", "TYPE", "SIZE"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.name, .architecture, .type, (.size // "-")]) | @tsv' | prettify
+            ;;
+        subnets|subnet)
+            echo "$out" | jq -r '(["NAME", "CIDR", "GATEWAY", "VLAN", "FABRIC"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.name, .cidr, (.gateway_ip // "-"), .vlan.vid, .vlan.fabric]) | @tsv' | prettify
+            ;;
+        fabrics|fabric)
+            echo "$out" | jq -r '(["ID", "NAME", "CLASS", "DESCRIPTION"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.id, .name, .class_type, (.description // "-")]) | @tsv' | prettify
+            ;;
+        vlans|vlan)
+            echo "$out" | jq -r '(["NAME", "VID", "FABRIC", "DHCP", "SPACE"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.name, .vid, .fabric, .dhcp_on, (.space // "-")]) | @tsv' | prettify
+            ;;
+        spaces|space)
+            echo "$out" | jq -r '(["ID", "NAME", "SUBNETS"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.id, .name, (.subnets | length)]) | @tsv' | prettify
+            ;;
+        ipranges|iprange)
+            echo "$out" | jq -r '(["TYPE", "START IP", "END IP", "COMMENT"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.type, .start_ip, .end_ip, (.comment // "-")]) | @tsv' | prettify
+            ;;
+        domains|domain)
+            echo "$out" | jq -r '(["NAME", "AUTHORITATIVE", "DEFAULT", "TTL"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.name, .authoritative, .is_default, (.ttl // "-")]) | @tsv' | prettify
+            ;;
+        rack-controllers|rack-controller)
+            echo "$out" | jq -r '(["HOSTNAME", "STATUS", "ZONE", "VERSION"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.hostname, .status_name, .zone.name, .version]) | @tsv' | prettify
+            ;;
+        *)
+            echo "$out" | python3 -c '
+    import sys, json
+    try:
+        data = json.load(sys.stdin)
+        if isinstance(data, dict): data = [data]
+        if not data or not isinstance(data, list):
+            print(json.dumps(data, indent=2))
+            sys.exit(0)
+            
+        ignored_suffixes = ("_uri", "_status_name", "_test_status", "_count")
+        
+        keys = []
+        for k, v in data[0].items():
+            if not isinstance(v, (str, int, bool, float)): continue
+            if any(k.endswith(s) for s in ignored_suffixes): continue
+            if k == "id": continue
+            keys.append(k)
+            
+        keys = keys[:6]
+        if not keys:
+            keys = [k for k, v in data[0].items() if isinstance(v, (str, int, bool, float))][:4]
+            
+        if not keys:
+            print(json.dumps(data, indent=2))
+            sys.exit(0)
+            
+        print("\t".join(k.upper().replace("_", " ") for k in keys))
+        print("\t".join("-" * len(k) for k in keys))
+        for item in data:
+            print("\t".join(str(item.get(k, "-")) for k in keys))
+    except Exception:
+        sys.exit(1)
+    ' | prettify || echo "$out" | jq -C .
+            ;;
+    esac
+
+- path: /etc/profile.d/default-editor.sh
+  permissions: '0644'
+  content: |
+    export EDITOR=nvim
+
+- path: /etc/sudoers.d/keep-editor
+  permissions: '0440'
+  content: |
+    Defaults env_keep += "EDITOR"
+
+{% if not nested_lxd and lxd_cert_b64 and lxd_key_b64 %}
+# Non-nested specific files (Host's LXD Certificates)
+- path: /root/snap/lxd/common/config/client.crt
+  owner: root:root
+  permissions: '0644'
+  encoding: b64
+  content: {{ lxd_cert_b64 }}
+
+- path: /root/snap/lxd/common/config/client.key
+  owner: root:root
+  permissions: '0600'
+  encoding: b64
+  content: {{ lxd_key_b64 }}
+{% endif %}
+
+packages:
+  - git
+  - neovim
+  - pollinate
+  - jq
+
+{% if not maas_snap %}
+apt:
+  sources:
+    maas:
+      source: 'ppa:maas/{{ maas_channel.split('/')[0] }}'
+{% endif %}
+
+snap:
+  commands:
+  - snap install lxd --channel={{ lxd_channel }}
+{% if maas_snap %}
+  - snap install maas --channel={{ maas_channel }}
+{% endif %}
+  - snap install juju --channel={{ juju_channel }}
+
+package_update: true
+package_upgrade: true
+package_reboot_if_required: true
+
+timezone: {{ timezone }}
+
+random_seed:
+  command: [pollinate]
+  command_required: true
+  file: /dev/urandom
+
+runcmd:
+
+{% if not maas_snap %}
+
+# Install MAAS (not using apt module or else bind conflicts with LXD)
+- echo "\n\n-------- Installing deb MAAS... --------\n"
+
+- apt-get update
+- apt-get install -y maas
+
+{% endif %}
+
+# Verify critical dependencies
+- echo "\n\n-------- Verifying dependencies... --------\n"
+- |
+  for cmd in lxc jq maas juju; do
+    if ! command -v $cmd >/dev/null 2>&1; then
+      echo "CRITICAL ERROR: Required command '$cmd' not found."
+      echo "Snap/apt package installation likely failed due to a network error."
+      exit 1
+    fi
+  done
+  echo "All dependencies verified successfully!"
+
+# Export variables
+- echo "\n\n-------- Exporting variables... --------\n"
+
+# --- Networking ---
+- export IP_ADDRESS=$(hostname -I | awk '{print $1}')
+- export INTERFACE=$(ip -j route show default | jq -r '.[].dev')
+
+# --- Auth & System ---
+- export SSH_KEY="{{ ssh_import_id }}"
+- export ADMIN_USER="{{ maas_user }}"
+- export ADMIN_PASS="{{ maas_password }}"
+- export ADMIN_EMAIL="{{ maas_email }}"
+- export RUN_AS="sudo -u {{ sys_user }}"
+- export RUN_AS_LOGIN="sudo -i -u {{ sys_user }}"
+
+# --- LXD Settings ---
+- export LXD_PROJECT="{{ lxd_project }}"
+- export LXD_POOL="{{ lxd_pool }}"
+{% if nested_lxd %}
+- export LXD_ADDR="${IP_ADDRESS}:8444"
+- export LXD_CERT="/root/lxd-local.crt"
+- export LXD_KEY="/root/lxd-local.key"
+{% else %}
+- export LXD_ADDR="{{ maas_gateway }}:8443"
+- export LXD_CERT="/root/snap/lxd/common/config/client.crt"
+- export LXD_KEY="/root/snap/lxd/common/config/client.key"
+{% endif %}
+
+# --- MAAS Networking ---
+- export MAAS_DOMAIN_NAME="{{ tld if tld else 'maas' }}"
+- export MAAS_GATEWAY="{{ maas_gateway }}"
+- export MAAS_CIDR="{{ maas_cidr }}"
+- export MAAS_DNS="{{ maas_dns }}"
+- export MAAS_RESERVED_IP_START="{{ maas_ip_start }}"
+- export MAAS_RESERVED_IP_END="{{ maas_ip_end }}"
+- export MAAS_IMAGES="{{ maas_images }}"
+- export MAAS_DB_NAME="{{ maas_db_name }}"
+
+# --- Channels ---
+- export HAPROXY_VERSION="{{ haproxy_channel }}"
+- export POSTGRESQL_VERSION="{{ postgresql_channel }}"
+- export RABBITMQ_VERSION="{{ rabbitmq_channel }}"
+- export LANDSCAPE_SERVER_VERSION="{{ landscape_server_channel }}"
+- export LANDSCAPE_CLIENT_VERSION="{{ landscape_client_channel }}"
+
+# --- Hardware Allocation ---
+- export JUJU_HA="{{ juju_ha }}"
+- export NODE_HA="{{ node_ha }}"
+- export CLIENT_HA="{{ client_ha }}"
+- export MAX_HA="{{ max_ha }}"
+
+- export JUJU_BASE="{{ juju_base }}"
+
+- export NODES_HOSTNAMES="{{ nodes_hostnames }}"
+- export NODES_CPUS="{{ nodes_cpus }}"
+- export NODES_RAMS="{{ nodes_rams }}"
+- export NODES_DISKS="{{ nodes_disks }}"
+
+- export CLIENT_BASE="{{ client_base }}"
+- export CLIENT_ACCOUNT_NAME=standalone
+- export CLIENT_COMPUTER_NAME=client
+
+- export PRO_TOKEN="{{ pro_token }}"
+
+# --- Dynamic IP Subnet Slicing ---
+- echo "\n\n-------- Calculating Payload IP Allocations --------\n"
+- |
+  eval $(python3 -c "
+  import ipaddress, sys
+  try:
+      net = ipaddress.IPv4Network('{{ maas_cidr }}', strict=False)
+      hosts = list(net.hosts())
+      
+      dhcp_count = int('{{ maas_ip_count }}')
+      
+      # Ensure the subnet is large enough to hold the requested IPs + Gateway + Static
+      total_needed = dhcp_count + 5 
+      if len(hosts) < total_needed:
+          print(f'echo \"CRITICAL: Subnet {net} is too small to fit the requested IP ranges!\"; exit 1')
+          sys.exit()
+      
+      maas_gw = hosts[0]
+      
+      # Top-Down Allocation Logic
+      maas_e = hosts[-1]
+      maas_s = hosts[-dhcp_count]
+      
+      print(f'export MAAS_GATEWAY={maas_gw}')
+      print(f'export MAAS_RESERVED_IP_START={maas_s}')
+      print(f'export MAAS_RESERVED_IP_END={maas_e}')
+  except Exception as e:
+      print(f'echo \"IP Math Error: {e}\"; exit 1')
+  ")
+
+{% if maas_snap %}
+
+# Install PostgreSQL
+- echo "\n\n-------- Install PostgreSQL... --------\n"
+
+- systemctl disable --now systemd-timesyncd
+- apt-get update
+- apt-get install -y postgresql
+
+# Configure PostgreSQL
+- echo "\n\n-------- Configure PostgreSQL... --------\n"
+
+- sudo -i -u postgres psql -c "CREATE USER \"$ADMIN_USER\" WITH ENCRYPTED PASSWORD '$ADMIN_PASS'"
+- sudo -i -u postgres createdb -O "$ADMIN_USER" "$MAAS_DB_NAME"
+- sed -i "1i host    $MAAS_DB_NAME    $ADMIN_USER    0/0     md5" /etc/postgresql/*/main/pg_hba.conf
+
+# Initialise snap MAAS
+- echo "\n\n-------- Initializing snap MAAS... --------\n"
+
+- maas init region+rack --database-uri "postgres://$ADMIN_USER:$ADMIN_PASS@$HOSTNAME/$MAAS_DB_NAME" --maas-url http://${IP_ADDRESS}:5240/MAAS
+- maas createadmin --username $ADMIN_USER --password $ADMIN_PASS --email $ADMIN_EMAIL {% if ssh_import_id %}--ssh-import $SSH_KEY{% endif %}
+
+{% else %}
+
+# Initialise deb MAAS
+- echo "\n\n-------- Initializing deb MAAS... --------\n"
+
+- maas init --admin-username $ADMIN_USER --admin-password $ADMIN_PASS --admin-email $ADMIN_EMAIL {% if ssh_import_id %}--admin-ssh-import $SSH_KEY{% endif %} --rbac-url "" --candid-agent-file ""
+
+{% endif %}
+
+# Wait for MAAS services to be ready
+- |
+  echo "\n\n-------- Waiting for MAAS API to be ready... --------\n"
+  
+  sleep 30
+  until maas login $ADMIN_USER 'http://localhost:5240/MAAS/' $(maas apikey --username $ADMIN_USER) > /dev/null 2>&1; do
+    echo "MAAS is not ready yet (502). Retrying in 30 seconds..."
+    sleep 30
+  done
+
+# Grab API key and login as admin
+- echo "\n\n-------- Logging in as '$ADMIN_USER' user... --------\n"
+
+- export APIKEY=$(maas apikey --username $ADMIN_USER)
+- maas login $ADMIN_USER 'http://localhost:5240/MAAS/' $APIKEY
+
+- maas $ADMIN_USER maas set-config name=maas_name value=$LXD_PROJECT name=completed_intro value=true
+
+# Automatically create and add ssh keys to MAAS
+- echo "\n\n-------- Generating SSH keys and adding them to MAAS... --------\n"
+
+- ssh-keygen -q -t rsa -N "" -f "/home/{{ sys_user }}/.ssh/id_rsa"
+- chown {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/.ssh/id_rsa /home/{{ sys_user }}/.ssh/id_rsa.pub
+- chmod 600 /home/{{ sys_user }}/.ssh/id_rsa
+- chmod 644 /home/{{ sys_user }}/.ssh/id_rsa.pub
+- maas $ADMIN_USER sshkeys create key="$(cat /home/{{ sys_user }}/.ssh/id_rsa.pub)"
+
+# Configure MAAS networking (set gateways, vlans, DHCP on etc)
+- echo "\n\n-------- Configuring MAAS networking... --------\n"
+
+- export FABRIC_ID=$(maas $ADMIN_USER subnet read "$MAAS_CIDR" | jq -r ".vlan.fabric_id")
+- export VLAN_TAG=$(maas $ADMIN_USER subnet read "$MAAS_CIDR" | jq -r ".vlan.vid")
+- export PRIMARY_RACK=$(maas $ADMIN_USER rack-controllers read | jq -r ".[] | .system_id")
+
+- maast $ADMIN_USER subnet update $MAAS_CIDR gateway_ip=$MAAS_GATEWAY
+- maast $ADMIN_USER ipranges create type=dynamic start_ip=$MAAS_RESERVED_IP_START end_ip=$MAAS_RESERVED_IP_END
+- maast $ADMIN_USER vlan update $FABRIC_ID $VLAN_TAG dhcp_on=true primary_rack=$PRIMARY_RACK
+- maast $ADMIN_USER maas set-config name=upstream_dns value=$MAAS_DNS
+
+# Set the MAAS domain name
+- |
+  echo "\n\n-------- Configuring MAAS domain '$MAAS_DOMAIN_NAME'... --------\n"
+  
+  # Check if MAAS auto-created the domain during initialization
+  EXISTING_DOMAIN_ID=$(maas $ADMIN_USER domains read | jq -r '.[] | select(.name=="'$MAAS_DOMAIN_NAME'") | .id')
+  
+  if [ -n "$EXISTING_DOMAIN_ID" ] && [ "$EXISTING_DOMAIN_ID" != "null" ]; then
+    echo "Domain '$MAAS_DOMAIN_NAME' already exists! Setting as default and authoritative..."
+    export MAAS_DOMAIN_NAME_ID=$EXISTING_DOMAIN_ID
+    maast $ADMIN_USER domain update $MAAS_DOMAIN_NAME_ID authoritative=true
+    maast $ADMIN_USER domain set-default $MAAS_DOMAIN_NAME_ID
+  else
+    echo "Domain not found. Renaming default domain to '$MAAS_DOMAIN_NAME'..."
+    export MAAS_DOMAIN_NAME_ID=$(maas $ADMIN_USER domains read | jq -r '.[] | select(.is_default==true) | .id')
+    maast $ADMIN_USER domain update $MAAS_DOMAIN_NAME_ID name=$MAAS_DOMAIN_NAME authoritative=true
+  fi
+  
+  # Update the rack controller to use the correct domain
+  maast $ADMIN_USER rack-controller update $PRIMARY_RACK domain=$MAAS_DOMAIN_NAME
+
+# Add MAAS DNS to host
+- |
+  cat <<EOF > /etc/netplan/99-maas-dns.yaml
+  network:
+    version: 2
+    ethernets:
+      $INTERFACE:
+        nameservers:
+          addresses: [$IP_ADDRESS]
+          search: [$MAAS_DOMAIN_NAME, maas]
+  EOF
+
+- chmod 600 /etc/netplan/99-maas-dns.yaml
+- netplan apply
+
+# Configure boot images
+- echo "\n\n-------- Configuring MAAS boot images... --------\n"
+
+- export BOOT_SOURCE_ID=$(maas $ADMIN_USER boot-sources read | jq -r '.[0].id')
+- |
+  for RELEASE in $MAAS_IMAGES; do
+    maast $ADMIN_USER boot-source-selections create $BOOT_SOURCE_ID os="ubuntu" release="$RELEASE" arches="amd64" labels='*' subarches='*'
+  done
+- maas $ADMIN_USER boot-resources import
+
+# Wait for MAAS boot images to be ready
+- |
+  echo "\n\n-------- Waiting for all MAAS boot images to sync... --------\n"
+  
+  while true; do
+    missing_images=false
+    
+    importing_status=$(maas $ADMIN_USER boot-resources is-importing)
+    requested_releases=$(maas $ADMIN_USER boot-source-selections read $BOOT_SOURCE_ID | jq -r '.[].release')
+    downloaded_releases=$(maas $ADMIN_USER boot-resources read | jq -r '.[].name' | sort | uniq)
+    
+    # Check if the image has been downloaded
+    for release in $requested_releases; do
+      if echo "$downloaded_releases" | grep -q "$release"; then
+         # Image exists. Now check if import is finished
+         if [ "$importing_status" = "false" ]; then
+             echo "  Image '$release' has downloaded!"
+         else
+             echo "  Image '$release' is currently syncing..."
+             missing_images=true
+         fi
+      else
+         echo "  Image '$release' was not found in boot resources..."
+         missing_images=true
+      fi
+    done
+    
+    # Check for missing images
+    if [ "$missing_images" = "false" ]; then
+      clean_list=$(echo "$requested_releases" | tr '\n' ' ')
+      echo "All selected boot images ( $clean_list) are fully synced!"
+      maast $ADMIN_USER boot-resources read
+      break
+    fi
+    
+    echo "Some images are missing. Waiting 30s..."
+    sleep 30
+  done
+
+{% if nested_lxd %}
+
+# Generate local LXD trust certificate
+- echo "\n\n-------- Generating trust certificate for local LXD... --------\n"
+
+- openssl req -x509 -newkey rsa:2048 -keyout $LXD_KEY -out $LXD_CERT -nodes -days 3650 -subj "/CN=lxd-local"
+- lxc config trust add $LXD_CERT --name lxd-local
+
+# Provide certs to user context
+- $RUN_AS mkdir -p /home/{{ sys_user }}/snap/lxd/common/config
+- cp $LXD_CERT /home/{{ sys_user }}/snap/lxd/common/config/client.crt
+- cp $LXD_KEY /home/{{ sys_user }}/snap/lxd/common/config/client.key
+- chown -R {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/snap/lxd/common/config
+
+{% else %}
+
+# Setup external LXD client certificates and remote connection
+- echo "\n\n-------- Configuring remote LXD connection... --------\n"
+
+- lxc remote add host-lxd https://$LXD_ADDR --accept-certificate
+- lxc remote switch host-lxd
+
+# Provide certs to user context
+- $RUN_AS mkdir -p /home/{{ sys_user }}/snap/lxd/common/config
+- cp $LXD_CERT /home/{{ sys_user }}/snap/lxd/common/config/client.crt
+- cp $LXD_KEY /home/{{ sys_user }}/snap/lxd/common/config/client.key
+- chown -R {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/snap/lxd/common/config
+- $RUN_AS lxc remote add host-lxd https://$LXD_ADDR --accept-certificate
+
+{% endif %}
+
+
+{% if lxd_project != "default" %}
+
+# Switch to LXD MAAS project
+- echo "\n\n-------- Switching to LXD '$LXD_PROJECT' project... --------\n"
+
+- lxc project switch $LXD_PROJECT
+
+{% endif %}
+
+# Create VMs directly via LXD
+- echo "\n\n-------- Creating empty VMs in LXD... --------\n"
+- |
+  i=1
+  for HOST in $NODES_HOSTNAMES; do
+    CPU=$(echo "$NODES_CPUS" | cut -d' ' -f$i)
+    RAM=$(echo "$NODES_RAMS" | cut -d' ' -f$i)
+    DISK=$(echo "$NODES_DISKS" | cut -d' ' -f$i)
+    
+    lxc init "$HOST" --vm --empty -c limits.cpu="$CPU" -c limits.memory="$RAM" -d root,size="$DISK"
+    
+    i=$((i + 1))
+  done
+
+# Start VMs to trigger PXE Boot & Enlistment
+- echo "\n\n-------- Starting VMs for MAAS enlistment... --------\n"
+- |
+  for HOST in $NODES_HOSTNAMES; do
+    lxc start $HOST
+  done
+
+# Wait for VMs to enlist in MAAS via MAC
+- |
+  echo "\n\n-------- Waiting for all VMs to enlist in MAAS... --------\n"
+  
+  while true; do
+    all_enlisted=true
+    
+    for HOST in $NODES_HOSTNAMES; do
+      # Fetch the dynamic MAC to identify the machine in MAAS
+      MAC=$(lxc config get $HOST volatile.eth0.hwaddr)
+      SYSTEM_ID=$(maas $ADMIN_USER machines read mac_address=$MAC | jq -r '.[0].system_id')
+      status=$(maas $ADMIN_USER machines read mac_address=$MAC | jq -r '.[0].status_name')
+      
+      if [ "$SYSTEM_ID" != "null" ] && [ "$status" = "New" ]; then
+        echo "  [OK] '$HOST' was enlisted with ID '$SYSTEM_ID'!"
+      else
+        if [ "$status" = "null" ]; then
+           status="Waiting for PXE"
+        fi
+        echo "  [..] '$HOST' ($MAC) is currently '$status'..."
+        all_enlisted=false
+      fi
+    done
+    
+    # If the flag is still true, everyone is enlisted -> break the loop
+    if [ "$all_enlisted" = true ]; then
+      echo "All VMs have successfully enlisted!\n"
+      lxc list
+      sleep 10
+      break
+    fi
+    
+    echo "Waiting 30s before next check..."
+    sleep 30
+  done
+
+# Create Availability Zones in MAAS
+- |
+  echo "\n\n-------- Creating Availability Zones... --------\n"
+  for i in $(seq 1 $MAX_HA); do
+    ZONE="AZ$i"
+    if ! maas $ADMIN_USER zones read | jq -e ".[] | select(.name==\"$ZONE\")" > /dev/null; then
+      echo "Creating zone: $ZONE"
+      maast $ADMIN_USER zones create name="$ZONE" description="Auto-generated AZ for HA Node $i"
+    else
+      echo "Zone $ZONE already exists."
+    fi
+  done
+  
+  echo "Assigning Primary MAAS Controller to AZ1..."
+  maast $ADMIN_USER rack-controller update "$PRIMARY_RACK" zone="AZ1"
+
+# Find machines by MAC and set hostnames, domain, and explicit LXD power controls
+- |
+  echo "\n\n-------- Configuring hostnames and power controls... --------\n"
+  
+  LXD_CERT_CONTENT=$(cat $LXD_CERT)
+  LXD_KEY_CONTENT=$(cat $LXD_KEY)
+  
+  for HOST in $NODES_HOSTNAMES; do
+    MAC=$(lxc config get $HOST volatile.eth0.hwaddr)
+    SYSTEM_ID=$(maas $ADMIN_USER machines read mac_address=$MAC | jq -r '.[0].system_id')
+    
+    # Assign AZ based on machine type
+    case "$HOST" in
+      client-*)
+        TARGET_ZONE="AZ1"
+        ;;
+      *)
+        NODE_NUM=$(echo "$HOST" | awk -F'-' '{print $NF}')
+        TARGET_ZONE="AZ${NODE_NUM}"
+        ;;
+    esac
+    
+    # Force the MAAS hostname, domain, and explicit LXD power controls
+    maast $ADMIN_USER machine update $SYSTEM_ID \
+      hostname=$HOST \
+      domain=$MAAS_DOMAIN_NAME_ID \
+      zone=$TARGET_ZONE \
+      power_type="lxd" \
+      power_parameters_power_address="https://$LXD_ADDR" \
+      power_parameters_certificate="$LXD_CERT_CONTENT" \
+      power_parameters_key="$LXD_KEY_CONTENT" \
+      power_parameters_instance_name="$HOST" \
+      power_parameters_project="$LXD_PROJECT"
+  done
+
+# Commission machines
+- echo "\n\n-------- Commissioning machines... --------\n"
+- |
+  for HOST in $NODES_HOSTNAMES; do
+    SYSTEM_ID=$(maas $ADMIN_USER machines read hostname=$HOST | jq -r '.[0].system_id')
+    maast $ADMIN_USER machine commission $SYSTEM_ID
+  done
+
+# Wait for VMs to be ready
+- |
+  echo "\n\n-------- Waiting for VMs to enter 'Ready' state... --------\n"
+  
+  while true; do
+    all_ready=true
+    
+    for HOST in $NODES_HOSTNAMES; do
+      # Query MAAS for the status
+      status=$(maas $ADMIN_USER machines read hostname=$HOST | jq -r '.[0].status_name')
+      
+      if [ "$status" = "Ready" ]; then
+        echo "  [OK] '$HOST' is '$status'!"
+      else
+        echo "  [..] '$HOST' is currently '$status'..."
+        all_ready=false
+      fi
+    done
+    
+    # If the flag is still true, everyone is ready -> break the loop
+    if [ "$all_ready" = true ]; then
+      echo "All VMs are Ready!"
+      maast $ADMIN_USER machines read
+      sleep 10
+      break
+    fi
+    
+    echo "Waiting 60s before checking again..."
+    sleep 60
+  done
+
+# Create tags and add them to commissioned machines
+- echo "\n\n-------- Creating and adding tags... --------\n"
+- |
+  maast $ADMIN_USER tags create name=juju-controller
+  maast $ADMIN_USER tags create name=landscape
+  maast $ADMIN_USER tags create name=client
+
+  for HOST in $NODES_HOSTNAMES; do
+    SYSTEM_ID=$(maas $ADMIN_USER machines read hostname=$HOST | jq -r '.[0].system_id')
+
+    # Tag main disks as SSDs
+    echo "\n\n-------- Tagging main disks as SSDs... --------\n"
+    
+    MAIN_BLOCK_ID=$(maas $ADMIN_USER block-devices read $SYSTEM_ID | jq -r '.[] | select(.serial == "lxd_root" or .name == "sda" or .name == "vda") | .id' | head -n 1)
+    if [ -n "$MAIN_BLOCK_ID" ] && [ "$MAIN_BLOCK_ID" != "null" ]; then
+      maast $ADMIN_USER block-device add-tag $SYSTEM_ID $MAIN_BLOCK_ID tag=ssd
+      maast $ADMIN_USER block-device remove-tag $SYSTEM_ID $MAIN_BLOCK_ID tag=rotary
+      maast $ADMIN_USER block-device remove-tag $SYSTEM_ID $MAIN_BLOCK_ID tag=1rpm
+    fi
+    
+    case "$HOST" in
+      juju-controller-*)
+        maast $ADMIN_USER tag update-nodes juju-controller add=$SYSTEM_ID
+        ;;
+        
+      node-*)
+        maast $ADMIN_USER tag update-nodes landscape add=$SYSTEM_ID
+        ;;
+        
+      client-*)
+        maast $ADMIN_USER tag update-nodes client add=$SYSTEM_ID
+        ;;
+    esac
+  done
+
+# Create MAAS Juju Cloud configuration files
+- echo "\n\n-------- Creating MAAS Juju Cloud Configs... --------\n"
+
+- |
+  cat <<EOF > /home/{{ sys_user }}/maas-cloud.yaml
+  clouds:
+    maas:
+      type: maas
+      auth-types: [oauth1]
+      endpoint: http://${IP_ADDRESS}:5240/MAAS
+  EOF
+
+- |
+  cat <<EOF > /home/{{ sys_user }}/maas-creds.yaml
+  credentials:
+    maas:
+      anyuser:
+        auth-type: oauth1
+        maas-oauth: $APIKEY
+  EOF
+
+- chown {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/maas-*.yaml
+
+# Add MAAS as a Juju Cloud
+- echo "\n\n-------- Adding MAAS as a Juju Cloud... --------\n"
+
+- $RUN_AS juju add-cloud --client -f /home/{{ sys_user }}/maas-cloud.yaml maas
+
+# Add MAAS as a Juju Cloud
+- echo "\n\n-------- Adding MAAS Credentials to Juju... --------\n"
+
+- $RUN_AS juju add-credential --client -f /home/{{ sys_user }}/maas-creds.yaml maas
+
+# Remove config files
+- rm /home/{{ sys_user }}/maas-*.yaml
+
+# Bootstrap Juju controller
+- echo "\n\n-------- Bootstrapping Juju Controller... --------\n"
+
+- $RUN_AS juju bootstrap --bootstrap-base=$JUJU_BASE --constraints tags=juju-controller maas juju-controller
+
+# Enable Juju HA if JUJU_HA > 1
+- |
+  if [ "$JUJU_HA" -gt 1 ]; then
+    echo "\n\n-------- Enabling Juju HA ($JUJU_HA nodes)... --------\n"
+    
+    $RUN_AS juju enable-ha -n $JUJU_HA --constraints tags=juju-controller
+    
+    echo "\n\n-------- Waiting for Juju HA controllers to provision... --------\n"
+    for i in $(seq 1 $((JUJU_HA - 1))); do
+      $RUN_AS juju wait-for machine $i -m controller --timeout=20m --query="life==\"alive\" && status==\"started\""
+    done
+  fi
+
+
+# -------------------------------------------- DEPLOY CHARMED HA LANDSCAPE --------------------------------------------
+
+
+# Create Juju Model
+- echo "\n\n-------- Creating Juju Landscape Model... --------\n"
+
+- $RUN_AS juju add-model --config default-base=$JUJU_BASE landscape-dense-maas
+
+# ------------------------------------------------- Deploy Machines -------------------------------------------------
+- echo "\n\n-------- Deploying Juju Machines... --------\n"
+
+- $RUN_AS juju add-machine -n $NODE_HA --constraints tags=landscape
+- $RUN_AS juju add-machine -n $CLIENT_HA --constraints tags=client
+
+# Wait for machines to be started so LXD is ready
+- echo "\n\n-------- Waiting for Machines to start... --------\n"
+
+- |
+  TOTAL_MACHINES=$((NODE_HA + CLIENT_HA - 1))
+  for i in $(seq 0 $TOTAL_MACHINES); do
+    $RUN_AS juju wait-for machine $i --timeout=20m --query="life==\"alive\" && status==\"started\""
+  done
+
+# ------------------------------------------------- Deploy HAProxy -------------------------------------------------
+- echo "\n\n-------- Deploying HAProxy... --------\n"
+
+- |
+  cat <<EOF > /home/{{ sys_user }}/haproxy.yaml
+  haproxy:
+    default_timeouts: queue 60000, connect 5000, client 120000, server 120000
+    global_default_bind_options: no-tlsv10
+    services: ""
+    ssl_cert: SELFSIGNED
+  EOF
+
+- chown {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/haproxy.yaml
+
+- |
+  LXD_PLACEMENT=$(for i in $(seq 0 $((NODE_HA - 1))); do echo -n "lxd:$i,"; done | sed 's/,$//')
+  $RUN_AS juju deploy -n $NODE_HA --channel $HAPROXY_VERSION --base=ubuntu@24.04 --to $LXD_PLACEMENT --config /home/{{ sys_user }}/haproxy.yaml haproxy
+
+- rm /home/{{ sys_user }}/haproxy.yaml
+
+# Expose HAProxy
+- $RUN_AS juju expose haproxy
+
+# Wait for HAProxy to be deployed
+- echo "\n\n-------- Waiting for HAProxy... --------\n"
+
+- $RUN_AS juju wait-for application haproxy --timeout=20m --query="life==\"alive\" && status==\"active\" && len(units) == $NODE_HA"
+
+# ------------------------------------------------- Deploy PostgreSQL -------------------------------------------------
+- echo "\n\n-------- Deploying PostgreSQL... --------\n"
+
+- |
+  cat <<EOF > /home/{{ sys_user }}/postgresql.yaml
+  postgresql:
+    plugin_plpython3u_enable: true
+    plugin_ltree_enable: true
+    plugin_intarray_enable: true
+    plugin_debversion_enable: true
+    plugin_pg_trgm_enable: true
+    experimental_max_connections: 500
+    memory_max_prepared_transactions: 500
+  EOF
+
+- chown {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/postgresql.yaml
+
+- |
+  BAREMETAL_PLACEMENT=$(seq -s, 0 $((NODE_HA - 1)))
+  $RUN_AS juju deploy -n $NODE_HA --channel $POSTGRESQL_VERSION --to $BAREMETAL_PLACEMENT --config /home/{{ sys_user }}/postgresql.yaml postgresql
+
+- rm /home/{{ sys_user }}/postgresql.yaml
+
+# Wait for PostgreSQL to be deployed
+- echo "\n\n-------- Waiting for PostgreSQL... --------\n"
+
+- $RUN_AS juju wait-for application postgresql --timeout=20m --query="life==\"alive\" && status==\"active\" && len(units) == $NODE_HA"
+
+# ----------------------------------------------- Deploy RabbitMQ Server -----------------------------------------------
+- echo "\n\n-------- Deploying RabbitMQ... --------\n"
+
+- |
+  cat <<EOF > /home/{{ sys_user }}/rabbitmq.yaml
+  rabbitmq-server:
+    consumer-timeout: 259200000
+  EOF
+
+- chown {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/rabbitmq.yaml
+
+- |
+  LXD_PLACEMENT=$(for i in $(seq 0 $((NODE_HA - 1))); do echo -n "lxd:$i,"; done | sed 's/,$//')
+  $RUN_AS juju deploy -n $NODE_HA --channel $RABBITMQ_VERSION --to $LXD_PLACEMENT --config /home/{{ sys_user }}/rabbitmq.yaml rabbitmq-server
+
+- rm /home/{{ sys_user }}/rabbitmq.yaml
+
+# Wait for RabbitMQ to be deployed
+- echo "\n\n-------- Waiting for RabbitMQ... --------\n"
+
+- $RUN_AS juju wait-for application rabbitmq-server --timeout=20m --query="life==\"alive\" && status==\"active\" && len(units) == $NODE_HA"
+
+# --------------------------------------------- Deploy Landscape Server ---------------------------------------------
+- echo "\n\n-------- Deploying Landscape Server... --------\n"
+
+- |
+  cat <<EOF > /home/{{ sys_user }}/landscape-server.yaml
+  landscape-server:
+    admin_name: "$ADMIN_USER"
+    admin_password: "$ADMIN_PASS"
+    admin_email: "$ADMIN_EMAIL"
+  EOF
+
+- chown {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/landscape-server.yaml
+
+- |
+  LXD_PLACEMENT=$(for i in $(seq 0 $((NODE_HA - 1))); do echo -n "lxd:$i,"; done | sed 's/,$//')
+  $RUN_AS juju deploy -n $NODE_HA --channel $LANDSCAPE_SERVER_VERSION --to $LXD_PLACEMENT --config /home/{{ sys_user }}/landscape-server.yaml landscape-server
+
+- rm /home/{{ sys_user }}/landscape-server.yaml
+
+# Integrate Landscape Server
+- $RUN_AS juju integrate landscape-server rabbitmq-server
+- $RUN_AS juju integrate landscape-server haproxy
+- $RUN_AS juju integrate landscape-server:db postgresql:db-admin
+
+# Wait for Landscape Server to be deployed
+- echo "\n\n-------- Waiting for Landscape Server... --------\n"
+
+- $RUN_AS juju wait-for application landscape-server --timeout=20m --query="life==\"alive\" && status==\"active\" && len(units) == $NODE_HA"
+
+# --------------------------------------------- Deploy Ubuntu machine ---------------------------------------------
+- echo "\n\n-------- Deploying Ubuntu Machine... --------\n"
+
+- |
+  CLIENT_PLACEMENT=$(seq -s, $NODE_HA $((NODE_HA + CLIENT_HA - 1)))
+  $RUN_AS juju deploy -n $CLIENT_HA --base $CLIENT_BASE --to $CLIENT_PLACEMENT ubuntu
+
+# Wait for Ubuntu to be deployed
+- echo "\n\n-------- Waiting for Ubuntu Machine... --------\n"
+
+- $RUN_AS juju wait-for application ubuntu --timeout=20m --query="life==\"alive\" && status==\"active\" && len(units) == $CLIENT_HA"
+
+# --------------------------------------------- Deploy Landscape Client ---------------------------------------------
+- echo "\n\n-------- Deploying Landscape Client... --------\n"
+
+# Obtain HAProxy IP
+- HAPROXY_IP=$(su ubuntu -c 'juju exec --unit haproxy/leader -- unit-get public-address')
+
+- |
+  cat <<EOF > /home/ubuntu/landscape-client.yaml
+  landscape-client:
+    computer-title: "$CLIENT_COMPUTER_NAME"
+    account-name: "$CLIENT_ACCOUNT_NAME"
+    ping-url: "http://${HAPROXY_IP}/ping"
+    url: "https://${HAPROXY_IP}/message-system"
+    script-users: 'nobody,landscape,root'
+    tags: ''
+  EOF
+
+- chown {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/landscape-client.yaml
+
+- $RUN_AS juju deploy --channel $LANDSCAPE_CLIENT_VERSION --config /home/{{ sys_user }}/landscape-client.yaml landscape-client
+
+- rm /home/{{ sys_user }}/landscape-client.yaml
+
+# Relate Client with Ubuntu Machine
+- echo "\n\n-------- Attaching Landscape Client to Ubuntu Machine... --------\n"
+
+- $RUN_AS juju relate landscape-client ubuntu
+
+# Wait for Landscape Server to be deployed
+- echo "\n\n-------- Waiting for Landscape Client... --------\n"
+
+- $RUN_AS juju wait-for application landscape-client --timeout=20m --query="life==\"alive\" && status==\"active\""
+
+{% if pro_token %}
+
+# Attach Ubuntu Pro Token
+- echo "\n\n-------- Attaching Ubuntu Pro Token... --------\n"
+- |
+  for i in $(seq 0 $((CLIENT_HA - 1))); do
+    $RUN_AS juju ssh ubuntu/$i "sudo pro attach $PRO_TOKEN"
+  done
+
+{% endif %}
+
+# Register Landscape client
+- echo "\n\n-------- Registering Landscape Client to Server... --------\n"
+
+- |
+  for i in $(seq 0 $((CLIENT_HA - 1))); do
+    $RUN_AS juju run landscape-client/$i register
+  done
+
+# Wait for Landscape to be deployed
+- echo "\n\n-------- Waiting for Landscape Client... --------\n"
+
+- $RUN_AS juju wait-for application landscape-client --timeout=20m --query="life==\"alive\" && len(units) == $CLIENT_HA"
+
+- echo "\n\n-------- Finished deploying HA Landscape, have fun!... --------\n"
+
