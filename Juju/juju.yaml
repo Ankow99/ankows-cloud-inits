@@ -1030,5 +1030,19 @@ runcmd:
 
 - $RUN_AS juju add-model --config default-base=$JUJU_BASE juju-test-model
 
+# ------------------------------------------------- Deploy Machines -------------------------------------------------
+- echo "\n\n-------- Deploying Juju Machines... --------\n"
+
+- $RUN_AS juju add-machine -n $NODE_HA --constraints tags=machine
+
+# Wait for machines to be started so LXD is ready
+- echo "\n\n-------- Waiting for Machines to start... --------\n"
+
+- |
+  TOTAL_MACHINES=$((NODE_HA - 1))
+  for i in $(seq 0 $TOTAL_MACHINES); do
+    $RUN_AS juju wait-for machine $i --timeout=20m --query="life==\"alive\" && status==\"started\""
+  done
+
 - echo "\n\n-------- Finished deploying Juju + MAAS, have fun!... --------\n"
 
