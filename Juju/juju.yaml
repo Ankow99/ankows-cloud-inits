@@ -2,7 +2,7 @@
 #cloud-config
 
 # ---
-# landscape transcript: Automated scalable cloud-init install of Landscape HA using Juju + MAAS
+# juju transcript: Automated scalable cloud-init install of Juju using MAAS
 # version: 1.0.0
 #
 # Made by: Pablo Gonzalez De Greiff @ Canonical
@@ -17,7 +17,7 @@
 {% set custom_maas_snap = True %}
 
 # --- Auth & System ---
-{% set custom_repro_name = "landscape" %}
+{% set custom_repro_name = "juju" %}
 {% set custom_vm_name = "maas-1" %}
 {% set custom_vm_image = "ubuntu:24.04" %}
 {% set custom_ssh_key = "" %}
@@ -26,18 +26,13 @@
 {% set custom_password = "ubuntu" %}                # PROMPT:System Password
 {% set custom_pro_token = "" %}                     # PROMPT:Pro Token
 {% set custom_hostname = "" %}                      # PROMPT:Hostname
-{% set custom_tld = "landscape" %}                  # PROMPT:Top Level Domain
+{% set custom_tld = "" %}                           # PROMPT:Top Level Domain
 {% set custom_timezone = "America/New_York" %}      # PROMPT:Timezone
 
 # --- Snap Channels ---
-{% set custom_lxd_channel = "5.21/stable" %}                  # PROMPT:LXD Channel
-{% set custom_maas_channel = "3.7/stable" %}                  # PROMPT:MAAS Channel
-{% set custom_juju_channel = "3.6/stable" %}                  # PROMPT:Juju Channel
-{% set custom_haproxy_channel = "latest/stable" %}            # PROMPT:HAProxy Channel
-{% set custom_postgresql_channel = "14/stable" %}             # PROMPT:PostreSQL Channel
-{% set custom_rabbitmq_channel = "3.9/stable" %}              # PROMPT:RabbitMQ Channel
-{% set custom_landscape_server_channel = "latest/stable" %}   # PROMPT:Landscape Server Channel
-{% set custom_landscape_client_channel = "latest/stable" %}   # PROMPT:Landscape Client Channel
+{% set custom_lxd_channel = "5.21/stable" %}        # PROMPT:LXD Channel
+{% set custom_maas_channel = "3.7/stable" %}        # PROMPT:MAAS Channel
+{% set custom_juju_channel = "3.6/stable" %}        # PROMPT:Juju Channel
 
 # --- LXD Settings ---
 {% set custom_lxd_project = "default" %}
@@ -55,7 +50,7 @@
 {% set custom_maas_ip_count = 30 %}                 # PROMPT:MAAS Reserved IP Pool Size
 
 # --- Hardware Allocation ---
-# Total: ( CPU = 22 | RAM = 60GiB | DISK = 310GiB )
+# Total: ( CPU = 22 | RAM = 58GiB | DISK = 210GiB )
 
 # MAAS Controller
 {% set custom_maas_cpu = "4" %}                     # PROMPT:MAAS Server CPU cores
@@ -63,27 +58,20 @@
 {% set custom_maas_disk = "30GiB" %}                # PROMPT:MAAS Server Root Disk
 
 # Juju Controllers per node
-{% set custom_juju_ha = 1 %}                        # PROMPT:Number of Juju Controllers
+{% set custom_juju_ha = 3 %}                        # PROMPT:Number of Juju Controllers
 {% set custom_juju_cpu = "2" %}                     # PROMPT:Juju Controller CPU cores
 {% set custom_juju_ram = "6GiB" %}                  # PROMPT:Juju Controller RAM
 {% set custom_juju_disk = "20GiB" %}                # PROMPT:Juju Controller Root Disk
 {% set custom_juju_base = "ubuntu@22.04" %}         # PROMPT:Juju Base
 
 # Machines Defaults per node
-{% set custom_node_ha = "3" %}                      # PROMPT:Number of Machines
-{% set custom_node_cpu = "3" %}                     # PROMPT:Machine CPU cores
-{% set custom_node_ram = "8GiB" %}                  # PROMPT:Machine RAM
-{% set custom_node_disk = "40GiB" %}                # PROMPT:Machine Root Disk
-
-# Client Node Defaults per node
-{% set custom_client_ha = "1" %}                    # PROMPT:Number of Client Nodes
-{% set custom_client_cpu = "2" %}                   # PROMPT:Client Node CPU cores
-{% set custom_client_ram = "4GiB" %}                # PROMPT:Client Node RAM
-{% set custom_client_disk = "10GiB" %}              # PROMPT:Client Node Root Disk
-{% set custom_client_base = "ubuntu@22.04" %}       # PROMPT:Client Node Base
+{% set custom_node_ha = 4 %}                         # PROMPT:Number of Machines
+{% set custom_node_cpu = "3" %}                      # PROMPT:Machine CPU cores
+{% set custom_node_ram = "8GiB" %}                   # PROMPT:Machine RAM
+{% set custom_node_disk = "30GiB" %}                 # PROMPT:Machine Root Disk
 
 # Juju status watch trigger message (leave empty to ignore)
-{% set custom_juju_trigger = "-------- Bootstrapping Juju Controller... --------" %}
+{% set custom_juju_trigger = "" %}
 
 # ==========================================
 # DATASOURCE PARSER (LXD vs Cloud)
@@ -116,11 +104,6 @@
 {% set lxd_channel = meta.get("lxd_channel") or custom_lxd_channel %}
 {% set maas_channel = meta.get("maas_channel") or custom_maas_channel %}
 {% set juju_channel = meta.get("juju_channel") or custom_juju_channel %}
-{% set haproxy_channel = meta.get("haproxy_channel") or custom_haproxy_channel %}
-{% set postgresql_channel = meta.get("postgresql_channel") or custom_postgresql_channel %}
-{% set rabbitmq_channel = meta.get("rabbitmq_channel") or custom_rabbitmq_channel %}
-{% set landscape_server_channel = meta.get("landscape_server_channel") or custom_landscape_server_channel %}
-{% set landscape_client_channel = meta.get("landscape_client_channel") or custom_landscape_client_channel %}
 
 {% set lxd_project = meta.get("lxd_project") or custom_lxd_project %}
 {% set lxd_pool = meta.get("lxd_pool") or custom_lxd_pool %}
@@ -148,12 +131,6 @@
 {% set node_ram = meta.get("node_ram") or custom_node_ram %}
 {% set node_disk = meta.get("node_disk") or custom_node_disk %}
 
-{% set client_ha = meta.get("client_ha") | default(custom_client_ha, true) | int %}
-{% set client_cpu = meta.get("client_cpu") or custom_client_cpu %}
-{% set client_ram = meta.get("client_ram") or custom_client_ram %}
-{% set client_disk = meta.get("client_disk") or custom_client_disk %}
-{% set client_base = meta.get("client_base") or custom_client_base %}
-
 {% if meta.get("maas_snap") is not none %}
   {% set maas_snap = (meta.get("maas_snap") | string | lower == "true") %}
 {% else %}
@@ -179,7 +156,7 @@
 # DYNAMIC HA NODE GENERATOR
 # ==========================================
 
-{% set max_ha = [juju_ha, node_ha, client_ha] | max %}
+{% set max_ha = [juju_ha, node_ha] | max %}
 
 {% set hostnames_list = [] %}
 {% set cpus_list = [] %}
@@ -200,14 +177,6 @@
   {% set _ = cpus_list.append(node_cpu) %}
   {% set _ = rams_list.append(node_ram) %}
   {% set _ = disks_list.append(node_disk) %}
-{% endfor %}
-
-# 3. Generate Client Nodes
-{% for i in range(1, client_ha + 1) %}
-  {% set _ = hostnames_list.append("client-" ~ i) %}
-  {% set _ = cpus_list.append(client_cpu) %}
-  {% set _ = rams_list.append(client_ram) %}
-  {% set _ = disks_list.append(client_disk) %}
 {% endfor %}
 
 # Compile final strings
@@ -590,17 +559,9 @@ runcmd:
 - export MAAS_CIDR="{{ maas_cidr }}"
 - export MAAS_RESERVED_IP_COUNT="{{ maas_ip_count }}"
 
-# --- Channels ---
-- export HAPROXY_VERSION="{{ haproxy_channel }}"
-- export POSTGRESQL_VERSION="{{ postgresql_channel }}"
-- export RABBITMQ_VERSION="{{ rabbitmq_channel }}"
-- export LANDSCAPE_SERVER_VERSION="{{ landscape_server_channel }}"
-- export LANDSCAPE_CLIENT_VERSION="{{ landscape_client_channel }}"
-
 # --- Hardware Allocation ---
 - export JUJU_HA="{{ juju_ha }}"
 - export NODE_HA="{{ node_ha }}"
-- export CLIENT_HA="{{ client_ha }}"
 - export MAX_HA="{{ max_ha }}"
 
 - export JUJU_BASE="{{ juju_base }}"
@@ -609,12 +570,6 @@ runcmd:
 - export NODES_CPUS="{{ nodes_cpus }}"
 - export NODES_RAMS="{{ nodes_rams }}"
 - export NODES_DISKS="{{ nodes_disks }}"
-
-- export CLIENT_BASE="{{ client_base }}"
-- export CLIENT_ACCOUNT_NAME=standalone
-- export CLIENT_COMPUTER_NAME=client
-
-- export PRO_TOKEN="{{ pro_token }}"
 
 # --- Dynamic IP Subnet Slicing ---
 - echo "\n\n-------- Calculating Payload IP Allocations --------\n"
@@ -985,8 +940,7 @@ runcmd:
 - echo "\n\n-------- Creating and adding tags... --------\n"
 - |
   maast $ADMIN_USER tags create name=juju-controller
-  maast $ADMIN_USER tags create name=landscape
-  maast $ADMIN_USER tags create name=client
+  maast $ADMIN_USER tags create name=machine
 
   for HOST in $NODES_HOSTNAMES; do
     SYSTEM_ID=$(maas $ADMIN_USER machines read hostname=$HOST | jq -r '.[0].system_id')
@@ -1007,13 +961,10 @@ runcmd:
         ;;
         
       node-*)
-        maast $ADMIN_USER tag update-nodes landscape add=$SYSTEM_ID
-        ;;
-        
-      client-*)
-        maast $ADMIN_USER tag update-nodes client add=$SYSTEM_ID
+        maast $ADMIN_USER tag update-nodes machine add=$SYSTEM_ID
         ;;
     esac
+    
   done
 
 # Create MAAS Juju Cloud configuration files
@@ -1071,204 +1022,13 @@ runcmd:
   fi
 
 
-# -------------------------------------------- DEPLOY CHARMED HA LANDSCAPE --------------------------------------------
+# -------------------------------------------- DEPLOY JUJU --------------------------------------------
 
 
 # Create Juju Model
-- echo "\n\n-------- Creating Juju Landscape Model... --------\n"
+- echo "\n\n-------- Creating Juju Test Model... --------\n"
 
-- $RUN_AS juju add-model --config default-base=$JUJU_BASE landscape-dense-maas
+- $RUN_AS juju add-model --config default-base=$JUJU_BASE juju-test-model
 
-# ------------------------------------------------- Deploy Machines -------------------------------------------------
-- echo "\n\n-------- Deploying Juju Machines... --------\n"
-
-- $RUN_AS juju add-machine -n $NODE_HA --constraints tags=landscape
-- $RUN_AS juju add-machine -n $CLIENT_HA --constraints tags=client
-
-# Wait for machines to be started so LXD is ready
-- echo "\n\n-------- Waiting for Machines to start... --------\n"
-
-- |
-  TOTAL_MACHINES=$((NODE_HA + CLIENT_HA - 1))
-  for i in $(seq 0 $TOTAL_MACHINES); do
-    $RUN_AS juju wait-for machine $i --timeout=20m --query="life==\"alive\" && status==\"started\""
-  done
-
-# ------------------------------------------------- Deploy HAProxy -------------------------------------------------
-- echo "\n\n-------- Deploying HAProxy... --------\n"
-
-- |
-  cat <<EOF > /home/{{ sys_user }}/haproxy.yaml
-  haproxy:
-    default_timeouts: queue 60000, connect 5000, client 120000, server 120000
-    global_default_bind_options: no-tlsv10
-    services: ""
-    ssl_cert: SELFSIGNED
-  EOF
-
-- chown {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/haproxy.yaml
-
-- |
-  LXD_PLACEMENT=$(for i in $(seq 0 $((NODE_HA - 1))); do echo -n "lxd:$i,"; done | sed 's/,$//')
-  $RUN_AS juju deploy -n $NODE_HA --channel $HAPROXY_VERSION --base=ubuntu@24.04 --to $LXD_PLACEMENT --config /home/{{ sys_user }}/haproxy.yaml haproxy
-
-- rm /home/{{ sys_user }}/haproxy.yaml
-
-# Expose HAProxy
-- $RUN_AS juju expose haproxy
-
-# Wait for HAProxy to be deployed
-- echo "\n\n-------- Waiting for HAProxy... --------\n"
-
-- $RUN_AS juju wait-for application haproxy --timeout=20m --query="life==\"alive\" && status==\"active\" && len(units) == $NODE_HA"
-
-# ------------------------------------------------- Deploy PostgreSQL -------------------------------------------------
-- echo "\n\n-------- Deploying PostgreSQL... --------\n"
-
-- |
-  cat <<EOF > /home/{{ sys_user }}/postgresql.yaml
-  postgresql:
-    plugin_plpython3u_enable: true
-    plugin_ltree_enable: true
-    plugin_intarray_enable: true
-    plugin_debversion_enable: true
-    plugin_pg_trgm_enable: true
-    experimental_max_connections: 500
-    memory_max_prepared_transactions: 500
-  EOF
-
-- chown {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/postgresql.yaml
-
-- |
-  BAREMETAL_PLACEMENT=$(seq -s, 0 $((NODE_HA - 1)))
-  $RUN_AS juju deploy -n $NODE_HA --channel $POSTGRESQL_VERSION --to $BAREMETAL_PLACEMENT --config /home/{{ sys_user }}/postgresql.yaml postgresql
-
-- rm /home/{{ sys_user }}/postgresql.yaml
-
-# Wait for PostgreSQL to be deployed
-- echo "\n\n-------- Waiting for PostgreSQL... --------\n"
-
-- $RUN_AS juju wait-for application postgresql --timeout=20m --query="life==\"alive\" && status==\"active\" && len(units) == $NODE_HA"
-
-# ----------------------------------------------- Deploy RabbitMQ Server -----------------------------------------------
-- echo "\n\n-------- Deploying RabbitMQ... --------\n"
-
-- |
-  cat <<EOF > /home/{{ sys_user }}/rabbitmq.yaml
-  rabbitmq-server:
-    consumer-timeout: 259200000
-  EOF
-
-- chown {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/rabbitmq.yaml
-
-- |
-  LXD_PLACEMENT=$(for i in $(seq 0 $((NODE_HA - 1))); do echo -n "lxd:$i,"; done | sed 's/,$//')
-  $RUN_AS juju deploy -n $NODE_HA --channel $RABBITMQ_VERSION --to $LXD_PLACEMENT --config /home/{{ sys_user }}/rabbitmq.yaml rabbitmq-server
-
-- rm /home/{{ sys_user }}/rabbitmq.yaml
-
-# Wait for RabbitMQ to be deployed
-- echo "\n\n-------- Waiting for RabbitMQ... --------\n"
-
-- $RUN_AS juju wait-for application rabbitmq-server --timeout=20m --query="life==\"alive\" && status==\"active\" && len(units) == $NODE_HA"
-
-# --------------------------------------------- Deploy Landscape Server ---------------------------------------------
-- echo "\n\n-------- Deploying Landscape Server... --------\n"
-
-- |
-  cat <<EOF > /home/{{ sys_user }}/landscape-server.yaml
-  landscape-server:
-    admin_name: "$ADMIN_USER"
-    admin_password: "$ADMIN_PASS"
-    admin_email: "$ADMIN_EMAIL"
-  EOF
-
-- chown {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/landscape-server.yaml
-
-- |
-  LXD_PLACEMENT=$(for i in $(seq 0 $((NODE_HA - 1))); do echo -n "lxd:$i,"; done | sed 's/,$//')
-  $RUN_AS juju deploy -n $NODE_HA --channel $LANDSCAPE_SERVER_VERSION --to $LXD_PLACEMENT --config /home/{{ sys_user }}/landscape-server.yaml landscape-server
-
-- rm /home/{{ sys_user }}/landscape-server.yaml
-
-# Integrate Landscape Server
-- $RUN_AS juju integrate landscape-server rabbitmq-server
-- $RUN_AS juju integrate landscape-server haproxy
-- $RUN_AS juju integrate landscape-server:db postgresql:db-admin
-
-# Wait for Landscape Server to be deployed
-- echo "\n\n-------- Waiting for Landscape Server... --------\n"
-
-- $RUN_AS juju wait-for application landscape-server --timeout=20m --query="life==\"alive\" && status==\"active\" && len(units) == $NODE_HA"
-
-# --------------------------------------------- Deploy Ubuntu machine ---------------------------------------------
-- echo "\n\n-------- Deploying Ubuntu Machine... --------\n"
-
-- |
-  CLIENT_PLACEMENT=$(seq -s, $NODE_HA $((NODE_HA + CLIENT_HA - 1)))
-  $RUN_AS juju deploy -n $CLIENT_HA --base $CLIENT_BASE --to $CLIENT_PLACEMENT ubuntu
-
-# Wait for Ubuntu to be deployed
-- echo "\n\n-------- Waiting for Ubuntu Machine... --------\n"
-
-- $RUN_AS juju wait-for application ubuntu --timeout=20m --query="life==\"alive\" && status==\"active\" && len(units) == $CLIENT_HA"
-
-# --------------------------------------------- Deploy Landscape Client ---------------------------------------------
-- echo "\n\n-------- Deploying Landscape Client... --------\n"
-
-# Obtain HAProxy IP
-- HAPROXY_IP=$(su ubuntu -c 'juju exec --unit haproxy/leader -- unit-get public-address')
-
-- |
-  cat <<EOF > /home/ubuntu/landscape-client.yaml
-  landscape-client:
-    computer-title: "$CLIENT_COMPUTER_NAME"
-    account-name: "$CLIENT_ACCOUNT_NAME"
-    ping-url: "http://${HAPROXY_IP}/ping"
-    url: "https://${HAPROXY_IP}/message-system"
-    script-users: 'nobody,landscape,root'
-    tags: ''
-  EOF
-
-- chown {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/landscape-client.yaml
-
-- $RUN_AS juju deploy --channel $LANDSCAPE_CLIENT_VERSION --config /home/{{ sys_user }}/landscape-client.yaml landscape-client
-
-- rm /home/{{ sys_user }}/landscape-client.yaml
-
-# Relate Client with Ubuntu Machine
-- echo "\n\n-------- Attaching Landscape Client to Ubuntu Machine... --------\n"
-
-- $RUN_AS juju relate landscape-client ubuntu
-
-# Wait for Landscape Server to be deployed
-- echo "\n\n-------- Waiting for Landscape Client... --------\n"
-
-- $RUN_AS juju wait-for application landscape-client --timeout=20m --query="life==\"alive\" && status==\"active\""
-
-{% if pro_token %}
-
-# Attach Ubuntu Pro Token
-- echo "\n\n-------- Attaching Ubuntu Pro Token... --------\n"
-- |
-  for i in $(seq 0 $((CLIENT_HA - 1))); do
-    $RUN_AS juju ssh ubuntu/$i "sudo pro attach $PRO_TOKEN"
-  done
-
-{% endif %}
-
-# Register Landscape client
-- echo "\n\n-------- Registering Landscape Client to Server... --------\n"
-
-- |
-  for i in $(seq 0 $((CLIENT_HA - 1))); do
-    $RUN_AS juju run landscape-client/$i register
-  done
-
-# Wait for Landscape to be deployed
-- echo "\n\n-------- Waiting for Landscape Client... --------\n"
-
-- $RUN_AS juju wait-for application landscape-client --timeout=20m --query="life==\"alive\" && len(units) == $CLIENT_HA"
-
-- echo "\n\n-------- Finished deploying HA Landscape, have fun!... --------\n"
+- echo "\n\n-------- Finished deploying Juju + MAAS, have fun!... --------\n"
 

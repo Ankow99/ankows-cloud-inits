@@ -1051,7 +1051,7 @@ if lxc project list | grep -q "$LXD_PROJECT"; then
     # Delete all instances inside the "$LXD_PROJECT" project first
     echo "Stopping and deleting all instances in project '$LXD_PROJECT'..."
     for inst in \$(lxc list --project "$LXD_PROJECT" --format json | jq -r '.[].name'); do
-        lxc stop -f --project "$LXD_PROJECT" "\$inst" || true
+        lxc stop -f --project "$LXD_PROJECT" "\$inst" 2>/dev/null || true
         sleep 2 # Wait for Ceph/OSD storage locks to release
         lxc delete -f --project "$LXD_PROJECT" "\$inst"
     done

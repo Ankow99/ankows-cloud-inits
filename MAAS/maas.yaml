@@ -2,7 +2,7 @@
 #cloud-config
 
 # ---
-# maas reproducer: Automated scalable cloud-init install of MAAS
+# maas transcript: Automated scalable cloud-init install of MAAS
 # version: 1.0.0
 #
 # Made by: Pablo Gonzalez De Greiff @ Canonical
@@ -42,7 +42,7 @@
 {% set custom_maas_user = "admin" %}                # PROMPT:MAAS Admin User
 {% set custom_maas_password = "admin" %}            # PROMPT:MAAS Admin Password
 {% set custom_maas_email = "admin@email.com" %}     # PROMPT:MAAS Admin Email
-{% set custom_maas_images = "noble" %}              # PROMPT:MAAS Deploy Images (space separated)
+{% set custom_maas_images = "noble jammy" %}        # PROMPT:MAAS Deploy Images (space separated)
 {% set custom_maas_dns = "8.8.8.8" %}               # PROMPT:MAAS DNS Forwarder
 {% set custom_maas_bridge = "mbr0" %}               # PROMPT:MAAS Bridge Name [BRIDGE:dhcp=false,cidr=maas_cidr]
 {% set custom_maas_cidr = "10.10.0.0/22" %}
@@ -56,11 +56,11 @@
 {% set custom_maas_ram = "8GiB" %}                  # PROMPT:MAAS Server RAM
 {% set custom_maas_disk = "30GiB" %}                # PROMPT:MAAS Server Root Disk
 
-# Machines
-{% set custom_mch_ha = 5 %}                         # PROMPT:Number of Machines
-{% set custom_mch_cpu = "3" %}                      # PROMPT:Machine CPU cores
-{% set custom_mch_ram = "8GiB" %}                   # PROMPT:Machine RAM
-{% set custom_mch_disk = "30GiB" %}                 # PROMPT:Machine Root Disk
+# Machines Defaults per node
+{% set custom_node_ha = 5 %}                         # PROMPT:Number of Machines
+{% set custom_node_cpu = "3" %}                      # PROMPT:Machine CPU cores
+{% set custom_node_ram = "8GiB" %}                   # PROMPT:Machine RAM
+{% set custom_node_disk = "30GiB" %}                 # PROMPT:Machine Root Disk
 
 # Juju status watch trigger message (leave empty to ignore)
 {% set custom_juju_trigger = "" %}
@@ -111,10 +111,10 @@
 {% set maas_cidr = meta.get("maas_cidr") or custom_maas_cidr %}
 {% set maas_ip_count = meta.get("maas_ip_count") | default(custom_maas_ip_count, true) | int %}
 
-{% set mch_ha = meta.get("mch_ha") | default(custom_mch_ha, true) | int %}
-{% set mch_cpu = meta.get("mch_cpu") or custom_mch_cpu %}
-{% set mch_ram = meta.get("mch_ram") or custom_mch_ram %}
-{% set mch_disk = meta.get("mch_disk") or custom_mch_disk %}
+{% set node_ha = meta.get("node_ha") | default(custom_node_ha, true) | int %}
+{% set node_cpu = meta.get("node_cpu") or custom_node_cpu %}
+{% set node_ram = meta.get("node_ram") or custom_node_ram %}
+{% set node_disk = meta.get("node_disk") or custom_node_disk %}
 
 {% if meta.get("maas_snap") is not none %}
   {% set maas_snap = (meta.get("maas_snap") | string | lower == "true") %}
@@ -141,19 +141,19 @@
 # DYNAMIC HA NODE GENERATOR
 # ==========================================
 
-{% set max_ha = [mch_ha] | max %}
+{% set max_ha = [node_ha] | max %}
 
 {% set hostnames_list = [] %}
 {% set cpus_list = [] %}
 {% set rams_list = [] %}
 {% set disks_list = [] %}
 
-# 1. Generate Machines
-{% for i in range(1, mch_ha + 1) %}
-  {% set _ = hostnames_list.append("machine-" ~ i) %}
-  {% set _ = cpus_list.append(mch_cpu) %}
-  {% set _ = rams_list.append(mch_ram) %}
-  {% set _ = disks_list.append(mch_disk) %}
+# 1. Generate Nodes
+{% for i in range(1, node_ha + 1) %}
+  {% set _ = hostnames_list.append("node-" ~ i) %}
+  {% set _ = cpus_list.append(node_cpu) %}
+  {% set _ = rams_list.append(node_ram) %}
+  {% set _ = disks_list.append(node_disk) %}
 {% endfor %}
 
 # Compile final strings
@@ -536,7 +536,7 @@ runcmd:
 - export MAAS_RESERVED_IP_COUNT="{{ maas_ip_count }}"
 
 # --- Hardware Allocation ---
-- export MCH_HA="{{ mch_ha }}"
+- export NODE_HA="{{ node_ha }}"
 - export MAX_HA="{{ max_ha }}"
 
 - export NODES_HOSTNAMES="{{ nodes_hostnames }}"
@@ -784,23 +784,6 @@ runcmd:
     i=$((i + 1))
   done
 
-# Attach specific extra devices to the cloud nodes
-- |
-  for HOST in $NODES_HOSTNAMES; do
-    case "$HOST" in
-      cloud-*)
-        # Loop to create and attach multiple OSD disks
-        for i in $(seq 1 $OSDS_PER_NODE); do
-          lxc storage volume create $LXD_POOL ${HOST}-osd${i}-disk size=$CLOUD_OSD_DISK --type=block
-          lxc config device add $HOST osd${i} disk pool=$LXD_POOL source=${HOST}-osd${i}-disk
-        done
-        
-        # Attach Neutron networking
-        lxc config device add $HOST eth1 nic nictype=bridged parent="$OS_NEUTRON_BRIDGE"
-        ;;
-    esac
-  done
-
 # Start VMs to trigger PXE Boot & Enlistment
 - echo "\n\n-------- Starting VMs for MAAS enlistment... --------\n"
 - |
@@ -870,7 +853,7 @@ runcmd:
   for HOST in $NODES_HOSTNAMES; do
     MAC=$(lxc config get $HOST volatile.eth0.hwaddr)
     SYSTEM_ID=$(maas $ADMIN_USER machines read mac_address=$MAC | jq -r '.[0].system_id')
-
+    
     NODE_NUM=$(echo "$HOST" | awk -F'-' '{print $NF}')
     TARGET_ZONE="AZ${NODE_NUM}"
     
@@ -948,6 +931,14 @@ runcmd:
     maast $ADMIN_USER tag update-nodes machine add=$SYSTEM_ID
     
   done
+
+# Deploy machines
+#- echo "\n\n-------- Deploying machines... --------\n"
+#- |
+#  for HOST in $NODES_HOSTNAMES; do
+#    SYSTEM_ID=$(maas $ADMIN_USER machines read hostname=$HOST | jq -r '.[0].system_id')
+#    maast $ADMIN_USER machine deploy $SYSTEM_ID ephemeral_deploy=false
+#  done
 
 - echo "\n\n-------- Finished deploying MAAS, have fun!... --------\n"
 
