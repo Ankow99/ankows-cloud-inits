@@ -2,8 +2,8 @@
 #cloud-config
 
 # ---
-# sunbeam transcript: Automated scalable cloud-init install of Sunbeam using MAAS
-# version: 5.0.0
+# openstack transcript: Automated scalable cloud-init install of Charmed OpenStack using Juju + MAAS
+# version: 1.0.0
 #
 # Made by: Pablo Gonzalez De Greiff @ Canonical
 # ---
@@ -17,22 +17,27 @@
 {% set custom_maas_snap = True %}
 
 # --- Auth & System ---
-{% set custom_repro_name = "sunbeam" %}
+{% set custom_repro_name = "openstack" %}
 {% set custom_vm_name = "maas-1" %}
-{% set custom_vm_image = "ubuntu:24.04" %}
+{% set custom_vm_image = "ubuntu:22.04" %}
 {% set custom_ssh_key = "" %}
 {% set custom_ssh_import_id = "" %}
 {% set custom_sys_user = "ubuntu" %}                # PROMPT:System User
 {% set custom_password = "ubuntu" %}                # PROMPT:System Password
 {% set custom_pro_token = "" %}                     # PROMPT:Pro Token
 {% set custom_hostname = "" %}                      # PROMPT:Hostname
-{% set custom_tld = "sunbeam" %}                    # PROMPT:Top Level Domain
+{% set custom_tld = "openstack" %}                  # PROMPT:Top Level Domain
 {% set custom_timezone = "America/New_York" %}      # PROMPT:Timezone
 
 # --- Snap Channels ---
-{% set custom_lxd_channel = "5.21/stable" %}        # PROMPT:LXD Channel
-{% set custom_maas_channel = "3.7/stable" %}        # PROMPT:MAAS Channel
-{% set custom_sunbeam_channel = "2024.1/stable" %}  # PROMPT:Sunbeam Channel
+{% set custom_lxd_channel = "5.21/stable" %}          # PROMPT:LXD Channel
+{% set custom_maas_channel = "3.7/stable" %}          # PROMPT:MAAS Channel
+{% set custom_juju_channel = "3.6/stable" %}          # PROMPT:Juju Channel
+{% set custom_openstack_channel = "2023.2/stable" %}  # PROMPT:OpenStack Channel
+{% set custom_ceph_channel = "reef/stable" %}         # PROMPT:Ceph Channel
+{% set custom_mysql_channel = "8.0/stable" %}         # PROMPT:MySQL InnoDB Channel
+{% set custom_rabbitmq_channel = "3.9/stable" %}      # PROMPT:RabbitMQ Channel
+{% set custom_ovn_channel = "23.09/stable" %}         # PROMPT:OVN Channel
 
 # --- LXD Settings ---
 {% set custom_lxd_project = "default" %}
@@ -43,19 +48,19 @@
 {% set custom_maas_user = "admin" %}                # PROMPT:MAAS Admin User
 {% set custom_maas_password = "admin" %}            # PROMPT:MAAS Admin Password
 {% set custom_maas_email = "admin@email.com" %}     # PROMPT:MAAS Admin Email
-{% set custom_maas_images = "noble" %}              # PROMPT:MAAS Deploy Images (space separated)
-{% set custom_maas_space = "sunspace" %}            # PROMPT:MAAS Network Space
+{% set custom_maas_images = "jammy" %}              # PROMPT:MAAS Deploy Images (space separated)
 {% set custom_maas_dns = "8.8.8.8" %}               # PROMPT:MAAS DNS Forwarder
 {% set custom_maas_bridge = "mbr0" %}               # PROMPT:MAAS Bridge Name [BRIDGE:dhcp=false,cidr=maas_cidr]
 {% set custom_maas_cidr = "10.10.0.0/22" %}
 {% set custom_maas_ip_count = 30 %}                 # PROMPT:MAAS Reserved IP Pool Size
 
 # --- OpenStack Settings ---
-{% set custom_os_deployment = "sunbeam" %}          # PROMPT:OpenStack Deployment Name
 {% set custom_os_neutron_bridge = "nbr0" %}         # PROMPT:Neutron Bridge Name [BRIDGE:dhcp=true,cidr=os_neutron_cidr]
 {% set custom_os_neutron_cidr = "10.20.0.0/22" %}
-{% set custom_os_pub_api_ip_count = 50 %}           # PROMPT:OpenStack Public API Pool Size
-{% set custom_os_int_api_ip_count = 50 %}           # PROMPT:OpenStack Internal API Pool Size
+{% set custom_os_ip_count = 50 %}                   # PROMPT:OpenStack Reserved IP Pool Size
+{% set custom_os_ram_flavor = 2048 %}               # PROMPT:OpenStack Flavor RAM
+{% set custom_os_disk_flavor = 10 %}                # PROMPT:OpenStack Flavor Disk
+{% set custom_os_e_disk_flavor = 10 %}              # PROMPT:OpenStack Flavor Ephemeral Disk
 
 # --- Hardware Allocation ---
 # Total: ( CPU = 22 | RAM = 60GiB | DISK = 310GiB )
@@ -69,24 +74,19 @@
 {% set custom_juju_ha = 1 %}                        # PROMPT:Number of Juju Controllers
 {% set custom_juju_cpu = "3" %}                     # PROMPT:Juju Controller CPU cores
 {% set custom_juju_ram = "6GiB" %}                  # PROMPT:Juju Controller RAM
-{% set custom_juju_disk = "30GiB" %}                # PROMPT:Juju Controller Root Disk
+{% set custom_juju_disk = "20GiB" %}                # PROMPT:Juju Controller Root Disk
+{% set custom_juju_base = "ubuntu@22.04" %}         # PROMPT:Juju Base
 
-# Sunbeam Controllers per node
-{% set custom_sunbeam_ha = 1 %}                     # PROMPT:Number of Sunbeam Controllers
-{% set custom_sunbeam_cpu = "3" %}                  # PROMPT:Sunbeam Controller CPU cores
-{% set custom_sunbeam_ram = "6GiB" %}               # PROMPT:Sunbeam Controller RAM
-{% set custom_sunbeam_disk = "30GiB" %}             # PROMPT:Sunbeam Controller Root Disk
-
-# Cloud Node Defaults per node
-{% set custom_cloud_ha = 1 %}                       # PROMPT:Number of Cloud Compute Nodes
-{% set custom_cloud_cpu = "12" %}                   # PROMPT:Cloud Node CPU cores
-{% set custom_cloud_ram = "40GiB" %}                # PROMPT:Cloud Node RAM
-{% set custom_cloud_disk = "100GiB" %}              # PROMPT:Cloud Node Root Disk
-{% set custom_cloud_osd_disk = "30GiB" %}           # PROMPT:Cloud Node OSD Disk (Each)
-{% set custom_cloud_osd_count = 4 %}                # PROMPT:Number of OSDs per Cloud Node
+# Machines Defaults per node
+{% set custom_node_ha = "4" %}                      # PROMPT:Number of Machines
+{% set custom_node_cpu = "4" %}                     # PROMPT:Machine CPU cores
+{% set custom_node_ram = "12GiB" %}                 # PROMPT:Machine RAM
+{% set custom_node_disk = "50GiB" %}                # PROMPT:Machine Root Disk
+{% set custom_node_osd_disk = "10GiB" %}            # PROMPT:Machine OSD Disk (Each)
+{% set custom_node_osd_count = 3 %}                 # PROMPT:Number of OSDs per Node
 
 # Juju status watch trigger message (leave empty to ignore)
-{% set custom_juju_trigger = "-------- Bootstrapping the orchestration layer... --------" %}
+{% set custom_juju_trigger = "-------- Bootstrapping Juju Controller... --------" %}
 
 # ==========================================
 # DATASOURCE PARSER (LXD vs Cloud)
@@ -118,7 +118,12 @@
 
 {% set lxd_channel = meta.get("lxd_channel") or custom_lxd_channel %}
 {% set maas_channel = meta.get("maas_channel") or custom_maas_channel %}
-{% set sunbeam_channel = meta.get("sunbeam_channel") or custom_sunbeam_channel %}
+{% set juju_channel = meta.get("juju_channel") or custom_juju_channel %}
+{% set openstack_channel = meta.get("openstack_channel") or custom_openstack_channel %}
+{% set ceph_channel = meta.get("ceph_channel") or custom_ceph_channel %}
+{% set mysql_channel = meta.get("mysql_channel") or custom_mysql_channel %}
+{% set rabbitmq_channel = meta.get("rabbitmq_channel") or custom_rabbitmq_channel %}
+{% set ovn_channel = meta.get("ovn_channel") or custom_ovn_channel %}
 
 {% set lxd_project = meta.get("lxd_project") or custom_lxd_project %}
 {% set lxd_pool = meta.get("lxd_pool") or custom_lxd_pool %}
@@ -130,34 +135,30 @@
 {% set maas_password = meta.get("maas_password") or custom_maas_password %}
 {% set maas_email = meta.get("maas_email") or custom_maas_email %}
 {% set maas_images = meta.get("maas_images") or custom_maas_images %}
-{% set maas_space = meta.get("maas_space") or custom_maas_space %}
 {% set maas_dns = meta.get("maas_dns") or custom_maas_dns %}
 {% set maas_bridge = meta.get("maas_bridge") or custom_maas_bridge %}
 {% set maas_cidr = meta.get("maas_cidr") or custom_maas_cidr %}
 {% set maas_ip_count = meta.get("maas_ip_count") | default(custom_maas_ip_count, true) | int %}
 
-{% set os_deployment = meta.get("os_deployment") or custom_os_deployment %}
 {% set os_neutron_bridge = meta.get("os_neutron_bridge") or custom_os_neutron_bridge %}
 {% set os_neutron_cidr = meta.get("os_neutron_cidr") or custom_os_neutron_cidr %}
-{% set os_pub_api_ip_count = meta.get("os_pub_api_ip_count") | default(custom_os_pub_api_ip_count, true) | int %}
-{% set os_int_api_ip_count = meta.get("os_int_api_ip_count") | default(custom_os_int_api_ip_count, true) | int %}
+{% set os_ip_count = meta.get("os_ip_count") | default(custom_os_ip_count, true) | int %}
+{% set os_ram_flavor = meta.get("os_ram_flavor") or custom_os_ram_flavor %}
+{% set os_disk_flavor = meta.get("os_disk_flavor") or custom_os_disk_flavor %}
+{% set os_e_disk_flavor = meta.get("os_e_disk_flavor") or custom_os_e_disk_flavor %}
 
 {% set juju_ha = meta.get("juju_ha") | default(custom_juju_ha, true) | int %}
 {% set juju_cpu = meta.get("juju_cpu") or custom_juju_cpu %}
 {% set juju_ram = meta.get("juju_ram") or custom_juju_ram %}
 {% set juju_disk = meta.get("juju_disk") or custom_juju_disk %}
+{% set juju_base = meta.get("juju_base") or custom_juju_base %}
 
-{% set sunbeam_ha = meta.get("sunbeam_ha") | default(custom_sunbeam_ha, true) | int %}
-{% set sunbeam_cpu = meta.get("sunbeam_cpu") or custom_sunbeam_cpu %}
-{% set sunbeam_ram = meta.get("sunbeam_ram") or custom_sunbeam_ram %}
-{% set sunbeam_disk = meta.get("sunbeam_disk") or custom_sunbeam_disk %}
-
-{% set cloud_ha = meta.get("cloud_ha") | default(custom_cloud_ha, true) | int %}
-{% set cloud_cpu = meta.get("cloud_cpu") or custom_cloud_cpu %}
-{% set cloud_ram = meta.get("cloud_ram") or custom_cloud_ram %}
-{% set cloud_disk = meta.get("cloud_disk") or custom_cloud_disk %}
-{% set cloud_osd_disk = meta.get("cloud_osd_disk") or custom_cloud_osd_disk %}
-{% set cloud_osd_count = meta.get("cloud_osd_count") | default(custom_cloud_osd_count, true) | int %}
+{% set node_ha = meta.get("node_ha") | default(custom_node_ha, true) | int %}
+{% set node_cpu = meta.get("node_cpu") or custom_node_cpu %}
+{% set node_ram = meta.get("node_ram") or custom_node_ram %}
+{% set node_disk = meta.get("node_disk") or custom_node_disk %}
+{% set node_osd_disk = meta.get("node_osd_disk") or custom_node_osd_disk %}
+{% set node_osd_count = meta.get("node_osd_count") | default(custom_node_osd_count, true) | int %}
 
 {% if meta.get("maas_snap") is not none %}
   {% set maas_snap = (meta.get("maas_snap") | string | lower == "true") %}
@@ -189,7 +190,7 @@
 # DYNAMIC HA NODE GENERATOR
 # ==========================================
 
-{% set max_ha = [juju_ha, sunbeam_ha, cloud_ha] | max %}
+{% set max_ha = [juju_ha, node_ha] | max %}
 
 {% set hostnames_list = [] %}
 {% set cpus_list = [] %}
@@ -204,20 +205,12 @@
   {% set _ = disks_list.append(juju_disk) %}
 {% endfor %}
 
-# 2. Generate Sunbeam Controllers
-{% for i in range(1, sunbeam_ha + 1) %}
-  {% set _ = hostnames_list.append("sunbeam-controller-" ~ i) %}
-  {% set _ = cpus_list.append(sunbeam_cpu) %}
-  {% set _ = rams_list.append(sunbeam_ram) %}
-  {% set _ = disks_list.append(sunbeam_disk) %}
-{% endfor %}
-
-# 3. Generate Cloud Nodes
-{% for i in range(1, cloud_ha + 1) %}
-  {% set _ = hostnames_list.append("cloud-" ~ i) %}
-  {% set _ = cpus_list.append(cloud_cpu) %}
-  {% set _ = rams_list.append(cloud_ram) %}
-  {% set _ = disks_list.append(cloud_disk) %}
+# 2. Generate Nodes
+{% for i in range(1, node_ha + 1) %}
+  {% set _ = hostnames_list.append("node-" ~ i) %}
+  {% set _ = cpus_list.append(node_cpu) %}
+  {% set _ = rams_list.append(node_ram) %}
+  {% set _ = disks_list.append(node_disk) %}
 {% endfor %}
 
 # Compile final strings
@@ -238,8 +231,8 @@
 {% endfor %}
 
 # Add the specific Cloud OSD disk(s) and a 10GB buffer
-{% set _cloud_osd_size = cloud_osd_disk | replace('GiB', '') | replace('GB', '') | int %}
-{% set total_osd_storage = _cloud_osd_size * cloud_osd_count * cloud_ha %}
+{% set _node_osd_size = node_osd_disk | replace('GiB', '') | replace('GB', '') | int %}
+{% set total_osd_storage = _node_osd_size * node_osd_count * node_ha %}
 {% set final_total = ns.total_storage + total_osd_storage + 10 %}
 {% set nested_storage = final_total | string ~ 'GiB' %}
 
@@ -337,9 +330,8 @@ lxd:
     projects: []
     cluster: null
 {% endif %}
-
 write_files:
-# Auto login script helper function (MAAS - LXD - Sunbeam)
+# Auto login script helper function (MAAS - LXD - OpenStack)
 - path: /etc/profile.d/maas-login.sh
   permissions: '0644'
   content: |
@@ -348,7 +340,7 @@ write_files:
         if command -v maas >/dev/null 2>&1 && sudo maas apikey --username $ADMIN_USER >/dev/null 2>&1; then
             maas login $ADMIN_USER 'http://localhost:5240/MAAS/' $(sudo maas apikey --username $ADMIN_USER) >/dev/null 2>&1
         fi
-        
+
         if command -v lxc >/dev/null 2>&1; then
             {% if not nested_lxd %}
             lxc remote switch host-lxd >/dev/null 2>&1 || true
@@ -358,8 +350,8 @@ write_files:
             {% endif %}
         fi
         
-        if [ -f "/home/{{ sys_user }}/sunrc" ]; then
-            source /home/{{ sys_user }}/sunrc
+        if [ -f "/home/{{ sys_user }}/openrc" ]; then
+            source /home/{{ sys_user }}/openrc
         fi
     fi
 
@@ -542,7 +534,9 @@ snap:
 {% if maas_snap %}
   - snap install maas --channel={{ maas_channel }}
 {% endif %}
-  - snap install openstack --channel={{ sunbeam_channel }}
+  - snap install juju --channel={{ juju_channel }}
+  - snap install vault --channel={{ vault_channel }}
+  - snap install openstackclients --channel={{ openstack_channel }}
 
 package_update: true
 package_upgrade: true
@@ -570,7 +564,7 @@ runcmd:
 # Verify critical dependencies
 - echo "\n\n-------- Verifying dependencies... --------\n"
 - |
-  for cmd in lxc jq maas sunbeam; do
+  for cmd in lxc jq maas juju openstack; do
     if ! command -v $cmd >/dev/null 2>&1; then
       echo "CRITICAL ERROR: Required command '$cmd' not found."
       echo "Snap/apt package installation likely failed due to a network error."
@@ -612,30 +606,51 @@ runcmd:
 - export MAAS_DOMAIN_NAME="{{ tld if tld else 'maas' }}"
 - export MAAS_DNS="{{ maas_dns }}"
 - export MAAS_IMAGES="{{ maas_images }}"
-- export MAAS_SPACE="{{ maas_space }}"
 - export MAAS_CIDR="{{ maas_cidr }}"
 - export MAAS_RESERVED_IP_COUNT="{{ maas_ip_count }}"
 
 # --- OpenStack Settings ---
-- export OS_DEPLOYMENT_NAME="{{ os_deployment }}"
 - export OS_NEUTRON_BRIDGE="{{ os_neutron_bridge }}"
 - export OS_NEUTRON_CIDR="{{ os_neutron_cidr }}"
-- export OS_PUBLIC_API_IP_COUNT="{{ os_pub_api_ip_count }}"
-- export OS_INTERNAL_API_IP_COUNT="{{ os_int_api_ip_count }}"
+- export OS_RESERVED_IP_COUNT="{{ os_ip_count }}"
+- export FLAVOR_RAM="{{ os_ram_flavor }}"
+- export FLAVOR_DISK="{{ os_disk_flavor }}"
+- export FLAVOR_E_DISK="{{ os_e_disk_flavor }}"
+
+# --- Channels ---
+- export NOVA_COMPUTE_VERSION="{{ openstack_channel }}"
+- export NOVA_CLOUD_CONTROLLER_VERSION="{{ openstack_channel }}"
+- export NEUTRON_API_VERSION="{{ openstack_channel }}"
+- export NEUTRON_API_PLUGIN_OVN_VERSION="{{ openstack_channel }}"
+- export KEYSTONE_VERSION="{{ openstack_channel }}"
+- export PLACEMENT_VERSION="{{ openstack_channel }}"
+- export GLANCE_VERSION="{{ openstack_channel }}"
+- export CINDER_VERSION="{{ openstack_channel }}"
+- export CINDER_CEPH_VERSION="{{ openstack_channel }}"
+- export OPENSTACK_DASHBOARD_VERSION="{{ openstack_channel }}"
+- export CEPH_OSD_VERSION="{{ ceph_channel }}"
+- export CEPH_MON_VERSION="{{ ceph_channel }}"
+- export CEPH_RADOSGW_VERSION="{{ ceph_channel }}"
+- export MYSQL_INNODB_VERSION="{{ mysql_channel }}"
+- export VAULT_VERSION="{{ vault_channel }}"
+- export RABBITMQ_VERSION="{{ rabbitmq_channel }}"
+- export OVN_CENTRAL_VERSION="{{ ovn_channel }}"
+- export OVN_CHASSIS_VERSION="{{ ovn_channel }}"
 
 # --- Hardware Allocation ---
 - export JUJU_HA="{{ juju_ha }}"
-- export SUNBEAM_HA="{{ sunbeam_ha }}"
-- export CLOUD_HA="{{ cloud_ha }}"
+- export NODE_HA="{{ node_ha }}"
 - export MAX_HA="{{ max_ha }}"
+
+- export JUJU_BASE="{{ juju_base }}"
 
 - export NODES_HOSTNAMES="{{ nodes_hostnames }}"
 - export NODES_CPUS="{{ nodes_cpus }}"
 - export NODES_RAMS="{{ nodes_rams }}"
 - export NODES_DISKS="{{ nodes_disks }}"
 
-- export CLOUD_OSD_DISK="{{ cloud_osd_disk }}"
-- export OSDS_PER_NODE="{{ cloud_osd_count }}"
+- export NODE_OSD_DISK="{{ node_osd_disk }}"
+- export OSDS_PER_NODE="{{ node_osd_count }}"
 
 # --- Dynamic IP Subnet Slicing ---
 - echo "\n\n-------- Calculating Payload IP Allocations --------\n"
@@ -647,11 +662,9 @@ runcmd:
       hosts = list(net.hosts())
       
       dhcp_count = int('{{ maas_ip_count }}')
-      int_count  = int('{{ os_int_api_ip_count }}')
-      pub_count  = int('{{ os_pub_api_ip_count }}')
       
       # Ensure the subnet is large enough to hold the requested IPs + Gateway + Static
-      total_needed = dhcp_count + int_count + pub_count + 5 
+      total_needed = dhcp_count + 5 
       if len(hosts) < total_needed:
           print(f'echo \"CRITICAL: Subnet {net} is too small to fit the requested IP ranges!\"; exit 1')
           sys.exit()
@@ -661,20 +674,31 @@ runcmd:
       # Top-Down Allocation Logic
       maas_e = hosts[-1]
       maas_s = hosts[-dhcp_count]
+
+      # 2. OpenStack Subnet IP Calculation
+      os_net = ipaddress.IPv4Network('{{ os_neutron_cidr }}', strict=False)
+      os_hosts = list(os_net.hosts())
       
-      int_e = hosts[-(dhcp_count + 1)]
-      int_s = hosts[-(dhcp_count + int_count)]
+      os_count = int('{{ os_ip_count }}')
       
-      pub_e = hosts[-(dhcp_count + int_count + 1)]
-      pub_s = hosts[-(dhcp_count + int_count + pub_count)]
+      # Ensure the subnet is large enough to hold the requested IPs + Gateway + Static
+      os_total_needed = os_count + 5
+      if len(os_hosts) < os_total_needed:
+          print(f'echo \"CRITICAL: Subnet {os_net} is too small to fit the requested IP ranges!\"; exit 1')
+          sys.exit()
+      
+      os_gw = os_hosts[0]
+      
+      # Top-Down Allocation Logic
+      os_e = os_hosts[-1]
+      os_s = os_hosts[-os_count]
       
       print(f'export MAAS_GATEWAY={maas_gw}')
       print(f'export MAAS_RESERVED_IP_START={maas_s}')
       print(f'export MAAS_RESERVED_IP_END={maas_e}')
-      print(f'export OS_INTERNAL_API_IP_START={int_s}')
-      print(f'export OS_INTERNAL_API_IP_END={int_e}')
-      print(f'export OS_PUBLIC_API_IP_START={pub_s}')
-      print(f'export OS_PUBLIC_API_IP_END={pub_e}')
+      print(f'export OS_NEUTRON_GATEWAY={os_gw}')
+      print(f'export OS_RESERVED_IP_START={os_s}')
+      print(f'export OS_RESERVED_IP_END={os_e}')
   except Exception as e:
       print(f'echo \"IP Math Error: {e}\"; exit 1')
   ")
@@ -746,8 +770,6 @@ runcmd:
 
 - maast $ADMIN_USER subnet update $MAAS_CIDR gateway_ip=$MAAS_GATEWAY
 - maast $ADMIN_USER ipranges create type=dynamic start_ip=$MAAS_RESERVED_IP_START end_ip=$MAAS_RESERVED_IP_END
-- maast $ADMIN_USER ipranges create type=reserved start_ip=$OS_INTERNAL_API_IP_START end_ip=$OS_INTERNAL_API_IP_END comment="${OS_DEPLOYMENT_NAME}-internal-api"
-- maast $ADMIN_USER ipranges create type=reserved start_ip=$OS_PUBLIC_API_IP_START end_ip=$OS_PUBLIC_API_IP_END comment="${OS_DEPLOYMENT_NAME}-public-api"
 - maast $ADMIN_USER vlan update $FABRIC_ID $VLAN_TAG dhcp_on=true primary_rack=$PRIMARY_RACK
 - maast $ADMIN_USER maas set-config name=upstream_dns value=$MAAS_DNS
 
@@ -891,14 +913,14 @@ runcmd:
     i=$((i + 1))
   done
 
-# Attach specific extra devices to the cloud nodes
+# Attach specific extra devices to the compute nodes
 - |
   for HOST in $NODES_HOSTNAMES; do
     case "$HOST" in
-      cloud-*)
+      node-*)
         # Loop to create and attach multiple OSD disks
         for i in $(seq 1 $OSDS_PER_NODE); do
-          lxc storage volume create $LXD_POOL ${HOST}-osd${i}-disk size=$CLOUD_OSD_DISK --type=block
+          lxc storage volume create $LXD_POOL ${HOST}-osd${i}-disk size=$NODE_OSD_DISK --type=block
           lxc config device add $HOST osd${i} disk pool=$LXD_POOL source=${HOST}-osd${i}-disk
         done
         
@@ -1036,13 +1058,8 @@ runcmd:
 # Create tags and add them to commissioned machines
 - echo "\n\n-------- Creating and adding tags... --------\n"
 - |
-  maast $ADMIN_USER tags create name=openstack-${OS_DEPLOYMENT_NAME}
-  maast $ADMIN_USER tags create name=control
-  maast $ADMIN_USER tags create name=compute
-  maast $ADMIN_USER tags create name=storage
-  maast $ADMIN_USER tags create name=network
-  maast $ADMIN_USER tags create name=sunbeam
   maast $ADMIN_USER tags create name=juju-controller
+  maast $ADMIN_USER tags create name=compute
 
   for HOST in $NODES_HOSTNAMES; do
     SYSTEM_ID=$(maas $ADMIN_USER machines read hostname=$HOST | jq -r '.[0].system_id')
@@ -1057,23 +1074,13 @@ runcmd:
       maast $ADMIN_USER block-device remove-tag $SYSTEM_ID $MAIN_BLOCK_ID tag=1rpm
     fi
     
-    # Base tag for all nodes
-    maast $ADMIN_USER tag update-nodes openstack-${OS_DEPLOYMENT_NAME} add=$SYSTEM_ID
-    
     case "$HOST" in
       juju-controller-*)
         maast $ADMIN_USER tag update-nodes juju-controller add=$SYSTEM_ID
         ;;
         
-      sunbeam-controller-*)
-        maast $ADMIN_USER tag update-nodes sunbeam add=$SYSTEM_ID
-        ;;
-        
-      cloud-*)
-        maast $ADMIN_USER tag update-nodes control add=$SYSTEM_ID
+      node-*)
         maast $ADMIN_USER tag update-nodes compute add=$SYSTEM_ID
-        maast $ADMIN_USER tag update-nodes storage add=$SYSTEM_ID
-        maast $ADMIN_USER tag update-nodes network add=$SYSTEM_ID
         
         # Tag the ceph osd devices
         echo "\n\n-------- Tagging ceph storage... --------\n"
@@ -1092,117 +1099,638 @@ runcmd:
         # Tag the additional neutron interface
         echo "\n\n-------- Tagging neutron interface... --------\n"
         
-        CLOUD_NEUTRON_MAC=$(lxc config get $HOST volatile.eth1.hwaddr)
-        CLOUD_NEUTRON_INTERFACE_ID=$(maas $ADMIN_USER interfaces read $SYSTEM_ID | jq -r '.[] | select(.mac_address=="'$CLOUD_NEUTRON_MAC'") | .id')
-        if [ -n "$CLOUD_NEUTRON_INTERFACE_ID" ] && [ "$CLOUD_NEUTRON_INTERFACE_ID" != "null" ]; then
-          maast $ADMIN_USER interface update $SYSTEM_ID $CLOUD_NEUTRON_INTERFACE_ID tags=neutron:physnet1
+        NODE_NEUTRON_MAC=$(lxc config get $HOST volatile.eth1.hwaddr)
+        NODE_NEUTRON_INTERFACE_ID=$(maas $ADMIN_USER interfaces read $SYSTEM_ID | jq -r '.[] | select(.mac_address=="'$NODE_NEUTRON_MAC'") | .id')
+        if [ -n "$NODE_NEUTRON_INTERFACE_ID" ] && [ "$NODE_NEUTRON_INTERFACE_ID" != "null" ]; then
+          maast $ADMIN_USER interface update $SYSTEM_ID $NODE_NEUTRON_INTERFACE_ID tags=neutron:physnet1
         fi
         ;;
     esac
   done
 
-# Prepare machine for Sunbeam usage
-- echo "\n\n-------- Preparing machine for Sunbeam usage... --------\n"
+# Create MAAS Juju Cloud configuration files
+- echo "\n\n-------- Creating MAAS Juju Cloud Configs... --------\n"
 
-- $RUN_AS sunbeam prepare-node-script --client | $RUN_AS bash -x
-
-# Add the Canonical MAAS provider
-- echo "\n\n-------- Adding the Canonical MAAS provider... --------\n"
-
-- $RUN_AS sunbeam deployment add maas $OS_DEPLOYMENT_NAME $APIKEY http://${IP_ADDRESS}:5240/MAAS
-
-# Map network spaces to cloud networks
-- echo "\n\n-------- Mapping network spaces to cloud networks... --------\n"
-
-- maast $ADMIN_USER spaces create name=$MAAS_SPACE
-- maast $ADMIN_USER vlan update $FABRIC_ID $VLAN_TAG space=$MAAS_SPACE
-- $RUN_AS sunbeam deployment space map $MAAS_SPACE
-
-# Validate MAAS provider
-- echo "\n\n-------- Validating MAAS provider... --------\n"
-
-- $RUN_AS sunbeam deployment validate
-
-- cat /home/{{ sys_user }}/snap/openstack/common/reports/*
-- echo "\n"
-- echo "Number of fails      - $(grep -c failed /home/{{ sys_user }}/snap/openstack/common/reports/*)"
-- echo "Number of warnings   - $(grep -c warning /home/{{ sys_user }}/snap/openstack/common/reports/*)"
-- echo "Number of successes  - $(grep -c success /home/{{ sys_user }}/snap/openstack/common/reports/*)"
-- echo "\n"
-
-- $RUN_AS sunbeam deployment show $OS_DEPLOYMENT_NAME
-- sleep 10
-
-# Generate Sunbeam deployment manifest
-- echo "\n\n-------- Generating Sunbeam manifest... --------\n"
 - |
-  if [ "$MAX_HA" -gt "1" ]; then
-    TOPOLOGY="multi"
-  else
-    TOPOLOGY="single"
-  fi
-  
-  cat <<EOF > /home/{{ sys_user }}/manifest.yaml
-  core:
-    config:
-      proxy:
-        proxy_required: false
-      database: $TOPOLOGY
-      region: RegionOne
-      user:
-        run_demo_setup: true
-        username: $ADMIN_USER
-        password: $ADMIN_PASS
-        cidr: 192.168.0.0/24
-        nameservers: $MAAS_DNS
-        security_group_rules: true
-        remote_access_location: local
-        physnet: physnet1
-      external-networks:
-        physnet1:
-          cidr: $OS_NEUTRON_CIDR
-          network_type: flat
-          nics:
+  cat <<EOF > /home/{{ sys_user }}/maas-cloud.yaml
+  clouds:
+    maas:
+      type: maas
+      auth-types: [oauth1]
+      endpoint: http://${IP_ADDRESS}:5240/MAAS
   EOF
-  
-  # Dynamically append all cloud nodes and their neutron interfaces
-  for HOST in $NODES_HOSTNAMES; do
-    case "$HOST" in
-      cloud-*)
-        echo "          $HOST: eth1" >> /home/{{ sys_user }}/manifest.yaml
-        ;;
-    esac
+
+- |
+  cat <<EOF > /home/{{ sys_user }}/maas-creds.yaml
+  credentials:
+    maas:
+      anyuser:
+        auth-type: oauth1
+        maas-oauth: $APIKEY
+  EOF
+
+- chown {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/maas-*.yaml
+
+# Add MAAS as a Juju Cloud
+- echo "\n\n-------- Adding MAAS as a Juju Cloud... --------\n"
+
+- $RUN_AS juju add-cloud --client -f /home/{{ sys_user }}/maas-cloud.yaml maas
+
+# Add MAAS as a Juju Cloud
+- echo "\n\n-------- Adding MAAS Credentials to Juju... --------\n"
+
+- $RUN_AS juju add-credential --client -f /home/{{ sys_user }}/maas-creds.yaml maas
+
+# Remove config files
+- rm /home/{{ sys_user }}/maas-*.yaml
+
+# Bootstrap Juju controller
+- echo "\n\n-------- Bootstrapping Juju Controller... --------\n"
+
+- $RUN_AS juju bootstrap --bootstrap-base=$JUJU_BASE --constraints tags=juju-controller maas juju-controller
+
+# Enable Juju HA if JUJU_HA > 1
+- |
+  if [ "$JUJU_HA" -gt 1 ]; then
+    echo "\n\n-------- Enabling Juju HA ($JUJU_HA nodes)... --------\n"
+    
+    $RUN_AS juju enable-ha -n $JUJU_HA --constraints tags=juju-controller
+    
+    echo "\n\n-------- Waiting for Juju HA controllers to provision... --------\n"
+    for i in $(seq 1 $((JUJU_HA - 1))); do
+      $RUN_AS juju wait-for machine $i -m controller --timeout=20m --query="life==\"alive\" && status==\"started\""
+    done
+  fi
+
+
+# -------------------------------------------- DEPLOY CHARMED OPENSTACK --------------------------------------------
+
+
+# Create Juju Model
+- echo "\n\n-------- Creating Juju Openstack Model... --------\n"
+
+- $RUN_AS juju add-model --config default-base=$JUJU_BASE openstack
+
+# ------------------------------------------------- Deploy Machines -------------------------------------------------
+- echo "\n\n-------- Deploying Juju Machines... --------\n"
+
+- $RUN_AS juju add-machine -n $NODE_HA --constraints tags=compute
+
+# Wait for machines to be started so LXD is ready
+- echo "\n\n-------- Waiting for Machines to start... --------\n"
+
+- |
+  TOTAL_MACHINES=$((NODE_HA - 1))
+  for i in $(seq 0 $TOTAL_MACHINES); do
+    $RUN_AS juju wait-for machine $i --timeout=20m --query="life==\"alive\" && status==\"started\""
   done
 
-- chown {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/manifest.yaml
-- cat /home/{{ sys_user }}/manifest.yaml
+# ------------------------------------------------- Deploy Ceph OSD -------------------------------------------------
+- echo "\n\n-------- Deploying Ceph OSD... --------\n"
 
-# Bootstrap the orchestration layer
-- echo "\n\n-------- Bootstrapping the orchestration layer... --------\n"
+- |
+  # Dynamically generate the block device path string (sdb, sdc, sdd...) based on OSD count
+  DEVICES=""
+  LETTERS=(b c d e f g h i j k l m)
+  for i in $(seq 1 $OSDS_PER_NODE); do
+      DEVICES="$DEVICES /dev/sd${LETTERS[$((i-1))]}"
+  done
+  
+  cat <<EOF > /home/{{ sys_user }}/ceph-osd.yaml
+  ceph-osd:
+    osd-devices:$DEVICES
+  EOF
 
-- $RUN_AS_LOGIN  script -q -e -c "sunbeam cluster bootstrap --accept-defaults --manifest /home/{{ sys_user }}/manifest.yaml" /dev/null
+- chown {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/ceph-osd.yaml
 
-- echo "\n\n-------- Controller Model Status... --------\n"
-- $RUN_AS juju status -m controller
+- $RUN_AS juju deploy -n 4 --to 0,1,2,3 --channel $CEPH_OSD_VERSION --config /home/{{ sys_user }}/ceph-osd.yaml ceph-osd
 
-- echo "\n\n-------- OpenStack-Infra Model Status... --------\n"
-- $RUN_AS juju status -m openstack-infra
+- rm /home/{{ sys_user }}/ceph-osd.yaml
 
-# Deploy the cloud
-- echo "\n\n-------- Deploying the cloud... --------\n"
+# Wait for Ceph OSD to be deployed
+- echo "\n\n-------- Waiting for Ceph OSD to be deployed... --------\n"
 
-- $RUN_AS_LOGIN  script -q -e -c "sunbeam cluster deploy --accept-defaults --manifest /home/{{ sys_user }}/manifest.yaml" /dev/null
+- $RUN_AS juju wait-for application ceph-osd --timeout=20m --query="life==\"alive\" && status==\"blocked\" && len(units) == 4"
 
-- echo "\n\n-------- OpenStack-Machines Model Status... --------\n"
-- $RUN_AS juju status -m openstack-machines
+# ----------------------------------------------- Deploy Nova Compute -----------------------------------------------
+- echo "\n\n-------- Deploying Nova Compute... --------\n"
 
-- echo "\n\n-------- OpenStack Model Status... --------\n"
-- $RUN_AS juju status -m openstack
+- |
+  cat <<EOF > /home/{{ sys_user }}/nova-compute.yaml
+  nova-compute:
+    config-flags: default_ephemeral_format=ext4
+    enable-live-migration: true
+    enable-resize: true
+    migration-auth-type: ssh
+    virt-type: qemu
+  EOF
 
-# Configure the cloud
-- echo "\n\n-------- Configuring the cloud... --------\n"
+- chown {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/nova-compute.yaml
 
-- $RUN_AS_LOGIN  script -q -e -c "sunbeam configure --accept-defaults --openrc /home/{{ sys_user }}/sunrc --manifest /home/{{ sys_user }}/manifest.yaml" /dev/null
+- $RUN_AS juju deploy -n 3 --to 1,2,3 --channel $NOVA_COMPUTE_VERSION --config /home/{{ sys_user }}/nova-compute.yaml nova-compute
 
-- echo "\n\n-------- Finished deploying Sunbeam, have fun!... --------\n"
+- rm /home/{{ sys_user }}/nova-compute.yaml
+
+# Wait for Nova Compute to be deployed
+- echo "\n\n-------- Waiting for Nova Compute to be deployed... --------\n"
+
+- $RUN_AS juju wait-for application nova-compute --query="life==\"alive\" && status==\"blocked\" && len(units) == 3"
+
+# ------------------------------------------- Deploy MySQL InnoDB Cluster -------------------------------------------
+- echo "\n\n-------- Deploying MySQL InnoDB Cluster... --------\n"
+
+- $RUN_AS juju deploy -n 3 --to lxd:0,lxd:1,lxd:2 --channel $MYSQL_INNODB_VERSION mysql-innodb-cluster
+
+# Wait for MySQL InnoDB Cluster to be ready
+- echo "\n\n-------- Waiting for MySQL InnoDB Cluster to be ready... --------\n"
+
+- $RUN_AS juju wait-for application mysql-innodb-cluster --query="life==\"alive\" && status==\"active\" && len(units) == 3"
+
+# -------------------------------------------------- Deploy Vault --------------------------------------------------
+- echo "\n\n-------- Deploying Vault... --------\n"
+
+- $RUN_AS juju deploy --to lxd:3 --channel $VAULT_VERSION vault
+
+# Join Vault to the cloud database
+- echo "\n\n-------- Joining Vault to the Cloud Database... --------\n"
+
+- $RUN_AS juju deploy --channel $MYSQL_INNODB_VERSION mysql-router vault-mysql-router
+- $RUN_AS juju integrate vault-mysql-router:db-router mysql-innodb-cluster:db-router
+- $RUN_AS juju integrate vault-mysql-router:shared-db vault:shared-db
+
+# Wait for Vault to be deployed
+- echo "\n\n-------- Waiting for Vault to be deployed... --------\n"
+
+- $RUN_AS juju wait-for application vault --query="life==\"alive\" && status==\"blocked\""
+- $RUN_AS juju wait-for application vault-mysql-router --query="life==\"alive\" && status==\"blocked\""
+
+# ------------------------------------------- Perform Vault initialization -------------------------------------------
+- echo "\n\n-------- Initializing Vault... --------\n"
+
+- export VAULT_ADDR="http://$(su ubuntu -c 'juju status --format=json' | jq -r '.applications.vault.units[] | select(.leader == true) | ."public-address"'):8200"
+
+- export INIT_OUTPUT=$(vault operator init -key-shares=3 -key-threshold=2)
+
+- export UNSEAL_KEY_1=$(echo "$INIT_OUTPUT" | grep "Unseal Key 1:" | awk '{print $4}')
+- export UNSEAL_KEY_2=$(echo "$INIT_OUTPUT" | grep "Unseal Key 2:" | awk '{print $4}')
+- export UNSEAL_KEY_3=$(echo "$INIT_OUTPUT" | grep "Unseal Key 3:" | awk '{print $4}')
+
+- export VAULT_TOKEN=$(echo "$INIT_OUTPUT" | grep "Initial Root Token:" | awk '{print $4}')
+
+- echo "\n Unseal Key 1 - $UNSEAL_KEY_1 \n"
+- echo "\n Unseal Key 2 - $UNSEAL_KEY_2 \n"
+- echo "\n Unseal Key 3 - $UNSEAL_KEY_3 \n"
+
+# Unsealing Vault
+- echo "\n\n-------- Unsealing Vault... --------\n"
+
+- $RUN_AS vault operator unseal $UNSEAL_KEY_1
+- $RUN_AS vault operator unseal $UNSEAL_KEY_2
+
+# Authorize Vault
+- echo "\n\n-------- Authorizing Vault... --------\n"
+
+- $RUN_AS vault token create -ttl=10m'
+- $RUN_AS juju run vault/leader authorize-charm token=$VAULT_TOKEN
+
+# Have Vault generate a self-signed root CA certificate
+- echo "\n\n-------- Generating Self-signed root CA certificate... --------\n"
+
+- $RUN_AS juju run vault/leader generate-root-ca
+- $RUN_AS juju integrate mysql-innodb-cluster:certificates vault:certificates
+
+# Wait for Vault to be ready
+- echo "\n\n-------- Waiting for Vault to be ready... --------\n"
+
+- $RUN_AS juju wait-for application vault --query="life==\"alive\" && status==\"active\""
+- $RUN_AS juju wait-for application vault-mysql-router --query="life==\"alive\" && status==\"active\""
+
+# -------------------------------------------- Deploy Neutron networking --------------------------------------------
+- echo "\n\n-------- Deploying Neutron... --------\n"
+
+- |
+  cat <<EOF > /home/{{ sys_user }}/neutron.yaml
+  ovn-chassis:
+    bridge-interface-mappings: br-ex:enp6s0
+    ovn-bridge-mappings: physnet1:br-ex
+  neutron-api:
+    neutron-security-groups: true
+    flat-network-providers: physnet1
+  EOF
+
+- chown {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/neutron.yaml
+
+- $RUN_AS juju deploy -n 3 --to lxd:0,lxd:1,lxd:2 --channel $OVN_CENTRAL_VERSION ovn-central
+- $RUN_AS juju deploy --to lxd:1 --channel $NEUTRON_API_VERSION --config /home/{{ sys_user }}/neutron.yaml neutron-api
+
+# Deploy the subordinate charm applications
+- $RUN_AS juju deploy --channel $NEUTRON_API_PLUGIN_OVN_VERSION neutron-api-plugin-ovn
+- $RUN_AS juju deploy --channel $OVN_CHASSIS_VERSION --config /home/{{ sys_user }}/neutron.yaml ovn-chassis
+
+- rm /home/{{ sys_user }}/neutron.yaml
+
+# Wait for OVN Central to be deployed
+- echo "\n\n-------- Waiting for OVN Central to be deployed... --------\n"
+
+- $RUN_AS juju wait-for application ovn-central --query="life==\"alive\" && status==\"blocked\" && len(units) == 3"
+
+# Integrate Neutron API with OVN
+- echo "\n\n-------- Integrate Neutron API with OVN... --------\n"
+
+- $RUN_AS juju integrate neutron-api-plugin-ovn:neutron-plugin neutron-api:neutron-plugin-api-subordinate
+- $RUN_AS juju integrate neutron-api-plugin-ovn:ovsdb-cms ovn-central:ovsdb-cms
+- $RUN_AS juju integrate ovn-chassis:ovsdb ovn-central:ovsdb
+
+# Integrate OVN with Nova Compute
+- echo "\n\n-------- Integrate OVN with Nova Compute... --------\n"
+
+- $RUN_AS juju integrate ovn-chassis:nova-compute nova-compute:neutron-plugin
+
+# Integrate Certificates
+- echo "\n\n-------- Integrate Certificates... --------\n"
+
+- $RUN_AS juju integrate neutron-api:certificates vault:certificates
+- $RUN_AS juju integrate neutron-api-plugin-ovn:certificates vault:certificates
+- $RUN_AS juju integrate ovn-central:certificates vault:certificates
+- $RUN_AS juju integrate ovn-chassis:certificates vault:certificates
+
+# Join Neutron API to the cloud database
+- echo "\n\n-------- Joining Neutron API to the Cloud Database... --------\n"
+
+- $RUN_AS juju deploy --channel $MYSQL_INNODB_VERSION mysql-router neutron-api-mysql-router
+- $RUN_AS juju integrate neutron-api-mysql-router:db-router mysql-innodb-cluster:db-router
+- $RUN_AS juju integrate neutron-api-mysql-router:shared-db neutron-api:shared-db
+
+# Wait for OVN Central to be ready
+- echo "\n\n-------- Waiting for OVN Central & Chassis to be ready... --------\n"
+
+- $RUN_AS juju wait-for application ovn-central --query="life==\"alive\" && status==\"active\" && len(units) == 3"
+- $RUN_AS juju wait-for application ovn-chassis --query="life==\"alive\" && status==\"active\" && len(units) == 3"
+- $RUN_AS juju wait-for application neutron-api-mysql-router --query="life==\"alive\" && status==\"active\""
+
+# ---------------------------------------------- Deploy Keystone ----------------------------------------------
+- echo "\n\n-------- Deploying Keystone... --------\n"
+
+- $RUN_AS juju deploy --to lxd:0 --channel $KEYSTONE_VERSION keystone
+
+# Join Keystone to the cloud database
+- echo "\n\n-------- Joining Keystone to the Cloud Database... --------\n"
+
+- $RUN_AS juju deploy --channel $MYSQL_INNODB_VERSION mysql-router keystone-mysql-router
+- $RUN_AS juju integrate keystone-mysql-router:db-router mysql-innodb-cluster:db-router
+- $RUN_AS juju integrate keystone-mysql-router:shared-db keystone:shared-db
+
+# Integrate Keystone with Vault and Neutron API
+- echo "\n\n-------- Integrate Keystone with Vault and Neutron API... --------\n"
+
+- $RUN_AS juju integrate keystone:identity-service neutron-api:identity-service
+- $RUN_AS juju integrate keystone:certificates vault:certificates
+
+# Wait for Keystone to be ready
+- echo "\n\n-------- Waiting for Keystone to be ready... --------\n"
+
+- $RUN_AS juju wait-for application keystone --query="life==\"alive\" && status==\"blocked\""
+- $RUN_AS juju wait-for application keystone-mysql-router --query="life==\"alive\" && status==\"active\""
+
+# ------------------------------------------------ Deploy RabbitMQ ------------------------------------------------
+- echo "\n\n-------- Deploying RabbitMQ... --------\n"
+
+- $RUN_AS juju deploy --to lxd:2 --channel $RABBITMQ_VERSION rabbitmq-server
+
+# Integrate RabbitMQ with Nova Compute and Neutron API
+- echo "\n\n-------- Integrate RabbitMQ with Nova Compute and Neutron API... --------\n"
+
+- $RUN_AS juju integrate rabbitmq-server:amqp neutron-api:amqp
+- $RUN_AS juju integrate rabbitmq-server:amqp nova-compute:amqp
+
+# Wait for RabbitMQ to be ready
+- echo "\n\n-------- Waiting for RabbitMQ to be ready... --------\n"
+
+- $RUN_AS juju wait-for application rabbitmq-server --query="life==\"alive\" && status==\"active\""
+
+# ------------------------------------------- Deploy Nova Cloud Controller -------------------------------------------
+- echo "\n\n-------- Deploying Nova Cloud Controller... --------\n"
+
+- |
+  cat <<EOF > /home/{{ sys_user }}/ncc.yaml
+  nova-cloud-controller:
+    network-manager: Neutron
+  EOF
+
+- chown {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/ncc.yaml
+
+- $RUN_AS juju deploy --to lxd:3 --channel $NOVA_CLOUD_CONTROLLER_VERSION --config /home/{{ sys_user }}/ncc.yaml nova-cloud-controller
+
+- rm /home/{{ sys_user }}/ncc.yaml
+
+# Join Nova Cloud Controller to the cloud database
+- echo "\n\n-------- Joining Nova Cloud Controller to the Cloud Database... --------\n"
+
+- $RUN_AS juju deploy --channel $MYSQL_INNODB_VERSION mysql-router ncc-mysql-router
+- $RUN_AS juju integrate ncc-mysql-router:db-router mysql-innodb-cluster:db-router
+- $RUN_AS juju integrate ncc-mysql-router:shared-db nova-cloud-controller:shared-db
+
+# Integrate Nova Cloud Controller
+- echo "\n\n-------- Integrate Nova Cloud Controller... --------\n"
+
+- $RUN_AS juju integrate nova-cloud-controller:identity-service keystone:identity-service
+- $RUN_AS juju integrate nova-cloud-controller:amqp rabbitmq-server:amqp
+- $RUN_AS juju integrate nova-cloud-controller:neutron-api neutron-api:neutron-api
+- $RUN_AS juju integrate nova-cloud-controller:cloud-compute nova-compute:cloud-compute
+- $RUN_AS juju integrate nova-cloud-controller:certificates vault:certificates
+
+# Wait for Nova Cloud Controller to be ready
+- echo "\n\n-------- Waiting for Nova Cloud Controller to be ready... --------\n"
+
+- $RUN_AS juju wait-for application nova-cloud-controller --query="life==\"alive\" && status==\"blocked\""
+- $RUN_AS juju wait-for application ncc-mysql-router --query="life==\"alive\" && status==\"active\""
+
+# ------------------------------------------------ Deploy Placement ------------------------------------------------
+- echo "\n\n-------- Deploying Placement... --------\n"
+
+- $RUN_AS juju deploy --to lxd:3 --channel $PLACEMENT_VERSION placement
+
+# Join placement to the cloud database
+- echo "\n\n-------- Joining Placement to the Cloud Database... --------\n"
+
+- $RUN_AS juju deploy --channel $MYSQL_INNODB_VERSION mysql-router placement-mysql-router
+- $RUN_AS juju integrate placement-mysql-router:db-router mysql-innodb-cluster:db-router
+- $RUN_AS juju integrate placement-mysql-router:shared-db placement:shared-db
+
+# Integrate Placement
+- echo "\n\n-------- Integrate Placement... --------\n"
+
+- $RUN_AS juju integrate placement:identity-service keystone:identity-service
+- $RUN_AS juju integrate placement:placement nova-cloud-controller:placement
+- $RUN_AS juju integrate placement:certificates vault:certificates
+
+# Wait for Placement to be ready
+- echo "\n\n-------- Waiting for Placement to be ready... --------\n"
+
+- $RUN_AS juju wait-for application placement --query="life==\"alive\" && status==\"blocked\""
+- $RUN_AS juju wait-for application placement-mysql-router --query="life==\"alive\" && status==\"active\""
+
+# -------------------------------------------- Deploy OpenStack Dashboard --------------------------------------------
+- echo "\n\n-------- Deploying OpenStack Dashboard... --------\n"
+
+- $RUN_AS juju deploy --to lxd:2 --channel $OPENSTACK_DASHBOARD_VERSION openstack-dashboard
+
+# Join OpenStack Dashboard to the cloud database
+- echo "\n\n-------- Joining OpenStack Dashboard to the Cloud Database... --------\n"
+
+- $RUN_AS juju deploy --channel $MYSQL_INNODB_VERSION mysql-router dashboard-mysql-router
+- $RUN_AS juju integrate dashboard-mysql-router:db-router mysql-innodb-cluster:db-router
+- $RUN_AS juju integrate dashboard-mysql-router:shared-db openstack-dashboard:shared-db
+
+# Integrate OpenStack Dashboard
+- echo "\n\n-------- Integrate OpenStack Dashboard... --------\n"
+
+- $RUN_AS juju integrate openstack-dashboard:identity-service keystone:identity-service
+- $RUN_AS juju integrate openstack-dashboard:certificates vault:certificates
+
+# Wait for OpenStack Dashboard to be ready
+- echo "\n\n-------- Waiting for OpenStack Dashboard to be ready... --------\n"
+
+- $RUN_AS juju wait-for application openstack-dashboard --query="life==\"alive\" && status==\"active\""
+- $RUN_AS juju wait-for application dashboard-mysql-router --query="life==\"alive\" && status==\"active\""
+
+# ------------------------------------------------ Deploy Glance ------------------------------------------------
+- echo "\n\n-------- Deploying Glance... --------\n"
+
+- $RUN_AS juju deploy --to lxd:3 --channel $GLANCE_VERSION glance
+
+# Join Glance to the cloud database
+- echo "\n\n-------- Joining Glance to the Cloud Database... --------\n"
+
+- $RUN_AS juju deploy --channel $MYSQL_INNODB_VERSION mysql-router glance-mysql-router
+- $RUN_AS juju integrate glance-mysql-router:db-router mysql-innodb-cluster:db-router
+- $RUN_AS juju integrate glance-mysql-router:shared-db glance:shared-db
+
+# Integrate Glance
+- echo "\n\n-------- Integrate Glance... --------\n"
+
+- $RUN_AS juju integrate glance:image-service nova-cloud-controller:image-service
+- $RUN_AS juju integrate glance:image-service nova-compute:image-service
+- $RUN_AS juju integrate glance:identity-service keystone:identity-service
+- $RUN_AS juju integrate glance:certificates vault:certificates
+
+# Wait for Glance to be ready
+- echo "\n\n-------- Waiting for Glance to be ready... --------\n"
+
+- $RUN_AS juju wait-for application glance --query="life==\"alive\" && status==\"waiting\""
+- $RUN_AS juju wait-for application glance-mysql-router --query="life==\"alive\" && status==\"active\""
+
+# ---------------------------------------------- Deploy Ceph Monitor ----------------------------------------------
+- echo "\n\n-------- Deploying Ceph Monitor... --------\n"
+
+- |
+  cat <<EOF > /home/{{ sys_user }}/ceph-mon.yaml
+  ceph-mon:
+    expected-osd-count: 4
+    monitor-count: 3
+  EOF
+
+- chown {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/ceph-mon.yaml
+
+- $RUN_AS juju deploy -n 3 --to lxd:0,lxd:1,lxd:2 --channel $CEPH_MON_VERSION --config /home/{{ sys_user }}/ceph-mon.yaml ceph-mon
+
+- rm /home/{{ sys_user }}/ceph-mon.yaml
+
+# Integrate Ceph Monitor
+- echo "\n\n-------- Integrate Ceph Monitor... --------\n"
+
+- $RUN_AS juju integrate ceph-mon:osd ceph-osd:mon
+- $RUN_AS juju integrate ceph-mon:client nova-compute:ceph
+- $RUN_AS juju integrate ceph-mon:client glance:ceph
+
+# Set Ceph as the storage backend for Nova non-bootable disk images
+- $RUN_AS juju config nova-compute libvirt-image-backend=rbd
+
+# Wait for Ceph Monitor to be ready
+- echo "\n\n-------- Waiting for Ceph Monitor to be ready... --------\n"
+
+- $RUN_AS juju wait-for application ceph-mon --query="life==\"alive\" && status==\"blocked\" && len(units) == 3"
+
+# ---------------------------------------------- Deploy Cinder ----------------------------------------------
+- echo "\n\n-------- Deploying Cinder... --------\n"
+
+- |
+  cat <<EOF > /home/{{ sys_user }}/cinder.yaml
+  cinder:
+    block-device: None
+    glance-api-version: 2
+  EOF
+
+- chown {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/cinder.yaml
+
+- $RUN_AS juju deploy --to lxd:1 --channel $CINDER_VERSION --config /home/{{ sys_user }}/cinder.yaml cinder
+
+- rm /home/{{ sys_user }}/cinder.yaml
+
+# Join Cinder to the cloud database
+- echo "\n\n-------- Joining Cinder to the Cloud Database... --------\n"
+
+- $RUN_AS juju deploy --channel $MYSQL_INNODB_VERSION mysql-router cinder-mysql-router
+- $RUN_AS juju integrate cinder-mysql-router:db-router mysql-innodb-cluster:db-router
+- $RUN_AS juju integrate cinder-mysql-router:shared-db cinder:shared-db
+
+# Integrate Cinder
+- echo "\n\n-------- Integrate Cinder... --------\n"
+
+- $RUN_AS juju integrate cinder:cinder-volume-service nova-cloud-controller:cinder-volume-service
+- $RUN_AS juju integrate cinder:identity-service keystone:identity-service
+- $RUN_AS juju integrate cinder:amqp rabbitmq-server:amqp
+- $RUN_AS juju integrate cinder:image-service glance:image-service
+- $RUN_AS juju integrate cinder:certificates vault:certificates
+
+# Wait for Cinder to be ready
+- echo "\n\n-------- Waiting for Cinder to be ready... --------\n"
+
+- $RUN_AS juju wait-for application cinder --query="life==\"alive\" && status==\"blocked\""
+- $RUN_AS juju wait-for application cinder-mysql-router --query="life==\"alive\" && status==\"active\""
+
+# ---------------------------------------------- Deploy Cinder-Ceph ----------------------------------------------
+- echo "\n\n-------- Deploying Cinder-Ceph... --------\n"
+
+- $RUN_AS juju deploy --channel $CINDER_CEPH_VERSION cinder-ceph
+
+# Integrate Cinder-Ceph
+- echo "\n\n-------- Integrate Cinder-Ceph... --------\n"
+
+- $RUN_AS juju integrate cinder-ceph:storage-backend cinder:storage-backend
+- $RUN_AS juju integrate cinder-ceph:ceph ceph-mon:client
+- $RUN_AS juju integrate cinder-ceph:ceph-access nova-compute:ceph-access
+
+# Wait for Cinder-Ceph to be ready
+- echo "\n\n-------- Waiting for Cinder-Ceph to be ready... --------\n"
+
+- $RUN_AS juju wait-for application cinder-ceph --query="life==\"alive\" && status==\"active\""
+
+# ---------------------------------------------- Deploy Ceph RADOS Gateway ----------------------------------------------
+- echo "\n\n-------- Deploying Ceph RADOS Gateway... --------\n"
+
+- $RUN_AS juju deploy --to lxd:0 --channel $CEPH_RADOSGW_VERSION ceph-radosgw
+
+# Integrate Ceph RADOS Gateway
+- echo "\n\n-------- Integrate Ceph RADOS Gateway... --------\n"
+
+- $RUN_AS juju integrate ceph-radosgw:mon ceph-mon:radosgw
+
+# Wait for Ceph RADOS Gateway to be ready
+- echo "\n\n-------- Waiting for Ceph RADOS Gateway to be ready... --------\n"
+
+- $RUN_AS juju wait-for application ceph-radosgw --timeout=20m --query="life==\"alive\" && status==\"active\""
+
+# --------------------------------------- Wait for OpenStack to Finish Deploying ---------------------------------------
+- echo "\n\n-------- Wait for OpenStack to finish deploying... --------\n"
+
+- $RUN_AS juju wait-for model openstack --query="life==\"alive\" && status==\"available\" && forEach(applications, app => app.status == \"active\")"
+
+# ---------------------------------------------------- Set openrc ----------------------------------------------------
+- echo "\n\n-------- Set openrc... --------\n"
+
+- |
+  cat <<'EOF' > /home/{{ sys_user }}/openrc
+  # Navigate Juju 2.9/3.x
+  JUJU_VERSION=$(juju version | cut -c 1)
+  
+  if [ $JUJU_VERSION -eq 2 ]; then
+      RUN="run"
+  else
+      RUN="exec"
+  fi
+  
+  # Place the cloud's CA certificate in a file readable by the openstackclients snap
+  _snap_user_dir=/home/{{ sys_user }}/snap/openstackclients/common
+  if [ ! -d $_snap_user_dir ]; then
+      mkdir -p $_snap_user_dir
+  fi
+  _root_ca=$_snap_user_dir/root-ca.crt
+  juju ${RUN} -u vault/leader -- 'leader-get root-ca' | tee $_root_ca >/dev/null 2>&1
+  
+  # Find an IP address for Keystone
+  _keystone_vip=$(juju config keystone vip)
+  if [ -n "$_keystone_vip" ]; then
+      _keystone_ip=$(echo $_keystone_vip | awk '{print $1}')
+  else
+      _keystone_ip=$(juju ${RUN} -u keystone/leader -- 'network-get --bind-address public')
+  fi
+  
+  # Query for the Keystone admin password
+  _password=$(juju ${RUN} -u keystone/leader -- 'leader-get admin_passwd')
+  
+  # Unset possible undercloud environment variables
+  unset "${!OS_*}"
+  
+  # Set the OpenStack environment variables
+  export OS_AUTH_PROTOCOL=https
+  export OS_CACERT=${_root_ca}
+  export OS_AUTH_URL=${OS_AUTH_PROTOCOL:-http}://${_keystone_ip}:5000/v3
+  export OS_USERNAME=admin
+  export OS_PASSWORD=${_password}
+  export OS_USER_DOMAIN_NAME=admin_domain
+  export OS_PROJECT_DOMAIN_NAME=admin_domain
+  export OS_PROJECT_NAME=admin
+  export OS_REGION_NAME=RegionOne
+  export OS_IDENTITY_API_VERSION=3
+  # Swift needs this
+  export OS_AUTH_VERSION=3
+  # Gnocchi needs this
+  export OS_AUTH_TYPE=password
+  
+  echo "To print the values to screen (including the admin password):"
+  echo
+  echo "   env | grep OS_"
+  EOF
+
+- chown {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/openrc
+
+# --------------------------------------------- Configure OpenStack ---------------------------------------------
+- echo "\n\n-------- Configure OpenStack... --------\n"
+
+- |
+  cat <<EOF > /home/{{ sys_user }}/openstack-config.sh
+  #!/bin/bash
+  
+  # Source openrc and print env variables
+  echo -e "\n\n-------- Source openrc... --------\n"
+  
+  source /home/{{ sys_user }}/openrc
+  env | grep OS_
+  
+  # Confirm the user environment
+  openstack endpoint list --interface admin
+  
+  # ------------------------------------------- Download image and set Flavor -------------------------------------------
+  echo -e "\n\n-------- Download Jammy image... --------\n"
+  
+  mkdir /home/{{ sys_user }}/cloud-images
+  wget -nv http://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img -O /home/{{ sys_user }}/cloud-images/jammy-amd64.img
+  
+  # Import image into Glance
+  echo -e "\n\n-------- Import Jammy image into Glance... --------\n"
+  
+  openstack image create --public --container-format bare --disk-format qcow2 --file /home/{{ sys_user }}/cloud-images/jammy-amd64.img jammy-amd64
+  
+  # Create a flavor
+  echo -e "\n\n-------- Create a Flavor... --------\n"
+  
+  openstack flavor create --ram $FLAVOR_RAM --disk $FLAVOR_DISK --ephemeral $FLAVOR_E_DISK m1
+  
+  # --------------------------------------------- Set up public networking ---------------------------------------------
+  echo -e "\n\n-------- Set up public networking... --------\n"
+  
+  # Create an external public (shared) network called ‘ext_net’
+  openstack network create --external --share --provider-network-type flat --provider-physical-network physnet1 ext_net
+  
+  # Create the subnet called ‘ext_subnet’
+  openstack subnet create --network ext_net --no-dhcp --gateway $OS_NEUTRON_GATEWAY --subnet-range $OS_NEUTRON_CIDR --allocation-pool start=$OS_RESERVED_IP_START,end=$OS_RESERVED_IP_END ext_subnet
+  EOF
+
+- chown {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/openstack-config.sh
+- chmod 755 /home/{{ sys_user }}/openstack-config.sh
+
+- $RUN_AS /home/{{ sys_user }}/openstack-config.sh
+
+- echo "\n\n-------- Finished deploying Charmed OpenStack, have fun!... --------\n"
 
