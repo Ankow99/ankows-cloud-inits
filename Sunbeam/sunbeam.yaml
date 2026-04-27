@@ -2,7 +2,7 @@
 #cloud-config
 
 # ---
-# sunbeam reproducer: Automated scalable cloud-init install of Sunbeam using MAAS
+# sunbeam transcript: Automated scalable cloud-init install of Sunbeam using MAAS
 # version: 5.0.0
 #
 # Made by: Pablo Gonzalez De Greiff @ Canonical
@@ -977,7 +977,7 @@ runcmd:
   for HOST in $NODES_HOSTNAMES; do
     MAC=$(lxc config get $HOST volatile.eth0.hwaddr)
     SYSTEM_ID=$(maas $ADMIN_USER machines read mac_address=$MAC | jq -r '.[0].system_id')
-
+    
     NODE_NUM=$(echo "$HOST" | awk -F'-' '{print $NF}')
     TARGET_ZONE="AZ${NODE_NUM}"
     
