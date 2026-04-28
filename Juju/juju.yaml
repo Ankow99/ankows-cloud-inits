@@ -298,6 +298,7 @@ write_files:
         fi
 
         if command -v lxc >/dev/null 2>&1; then
+            : # Prevent bash syntax error if Jinja strips the lines below
             {% if not nested_lxd %}
             lxc remote switch host-lxd >/dev/null 2>&1 || true
             {% endif %}

@@ -63,10 +63,10 @@
 {% set custom_os_e_disk_flavor = 10 %}              # PROMPT:OpenStack Flavor Ephemeral Disk
 
 # --- Hardware Allocation ---
-# Total: ( CPU = 22 | RAM = 60GiB | DISK = 310GiB )
+# Total: ( CPU = 22 | RAM = 62GiB | DISK = 370GiB )
 
 # MAAS Controller
-{% set custom_maas_cpu = "4" %}                     # PROMPT:MAAS Server CPU cores
+{% set custom_maas_cpu = "3" %}                     # PROMPT:MAAS Server CPU cores
 {% set custom_maas_ram = "8GiB" %}                  # PROMPT:MAAS Server RAM
 {% set custom_maas_disk = "30GiB" %}                # PROMPT:MAAS Server Root Disk
 
@@ -342,6 +342,7 @@ write_files:
         fi
 
         if command -v lxc >/dev/null 2>&1; then
+            : # Prevent bash syntax error if Jinja strips the lines below
             {% if not nested_lxd %}
             lxc remote switch host-lxd >/dev/null 2>&1 || true
             {% endif %}

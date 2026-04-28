@@ -773,7 +773,7 @@ printf "  %-28s %s\n" "Project Name:" "$LXD_PROJECT"
 
 # Network Summary
 if [ "$NESTED" = true ]; then
-    printf "  %-28s %s\n" "Architecture:" "nested (using own LXD inside VM)"
+    printf "  %-28s %s\n" "Architecture:" "${BRED}nested (using own LXD inside VM)${NC}"
     echo -e "${BYELLOW}  -------------------- Network --------------------${NC}"
     printf "  %-28s %s\n" "Uplink Bridge:" "$PRIMARY_BRIDGE (Gateway: $PRIMARY_GW_IP)"
     printf "  %-30s %s\n" "  - Subnet CIDR:" "$HOST_CIDR"
@@ -1008,6 +1008,11 @@ fi
 # ==========================================
 # LAUNCH MAIN VM
 # ==========================================
+
+# If Nested, use the repro name as VM_NAME
+if [ "$NESTED" = true ]; then
+    VM_NAME=$REPRO_NAME
+fi
 
 # 1. Launch VM
 echo ""
