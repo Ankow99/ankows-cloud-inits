@@ -57,10 +57,10 @@
 {% set custom_maas_disk = "30GiB" %}                # PROMPT:MAAS Server Root Disk
 
 # Machines Defaults per node
-{% set custom_node_ha = 5 %}                         # PROMPT:Number of Machines
-{% set custom_node_cpu = "3" %}                      # PROMPT:Machine CPU cores
-{% set custom_node_ram = "8GiB" %}                   # PROMPT:Machine RAM
-{% set custom_node_disk = "30GiB" %}                 # PROMPT:Machine Root Disk
+{% set custom_node_ha = 5 %}                        # PROMPT:Number of Machines
+{% set custom_node_cpu = "3" %}                     # PROMPT:Machine CPU cores
+{% set custom_node_ram = "8GiB" %}                  # PROMPT:Machine RAM
+{% set custom_node_disk = "30GiB" %}                # PROMPT:Machine Root Disk
 
 # Juju status watch trigger message (leave empty to ignore)
 {% set custom_juju_trigger = "" %}

@@ -1,0 +1,418 @@
+## template: jinja
+#cloud-config
+
+# ---
+# lxd transcript: Automated scalable cloud-init install of LXD
+# version: 1.0.0
+#
+# Made by: Pablo Gonzalez De Greiff @ Canonical
+# ---
+
+# ==========================================
+# DEFAULT JINJA CONFIGURATIONS
+# ==========================================
+
+# --- Architecture Toggle ---
+{% set custom_nested_lxd = True %}
+
+# --- Auth & System ---
+{% set custom_repro_name = "lxd" %}
+{% set custom_vm_name = "node-1" %}
+{% set custom_vm_image = "ubuntu:24.04" %}
+{% set custom_ssh_key = "" %}
+{% set custom_ssh_import_id = "" %}
+{% set custom_sys_user = "ubuntu" %}                # PROMPT:System User
+{% set custom_password = "ubuntu" %}                # PROMPT:System Password
+{% set custom_pro_token = "" %}                     # PROMPT:Pro Token
+{% set custom_hostname = "" %}                      # PROMPT:Hostname
+{% set custom_tld = "" %}                           # PROMPT:Top Level Domain
+{% set custom_timezone = "America/New_York" %}      # PROMPT:Timezone
+
+# --- Snap Channels ---
+{% set custom_lxd_channel = "5.21/stable" %}        # PROMPT:LXD Channel
+
+# --- LXD Settings ---
+{% set custom_lxd_project = "default" %}
+{% set custom_lxd_pool = "default" %}               # PROMPT:LXD Storage Pool
+{% set custom_lxd_bridge = "lbr0" %}                # PROMPT:LXD Bridge Name [BRIDGE:dhcp=true,cidr=lxd_cidr]
+{% set custom_lxd_cidr = "10.10.0.0/22" %}
+
+# --- Hardware Allocation ---
+# Total: ( CPU = 19 | RAM = 48GiB | DISK = 180GiB )
+
+# Primary VM
+{% set custom_primary_cpu = "4" %}                  # PROMPT:Primary VM CPU cores
+{% set custom_primary_ram = "8GiB" %}               # PROMPT:Primary VM RAM
+{% set custom_primary_disk = "30GiB" %}             # PROMPT:Primary VM Root Disk
+
+# Machines Defaults per node
+{% set custom_node_ha = 5 %}                        # PROMPT:Number of Machines
+{% set custom_node_cpu = "3" %}                     # PROMPT:Machine CPU cores
+{% set custom_node_ram = "8GiB" %}                  # PROMPT:Machine RAM
+{% set custom_node_disk = "30GiB" %}                # PROMPT:Machine Root Disk
+
+# Juju status watch trigger message (leave empty to ignore)
+{% set custom_juju_trigger = "" %}
+
+# ==========================================
+# DATASOURCE PARSER (LXD vs Cloud)
+# ==========================================
+
+{% if cloud_name == "lxd" %}
+  {% set meta = {} %}
+  {% for key, value in ds.config.items() %}
+    {% if key.startswith("user_") %}
+      {% set _ = meta.__setitem__(key[5:], value) %}
+    {% endif %}
+  {% endfor %}
+{% else %}
+  {% set meta = ds.meta_data.get("meta") if ds.meta_data.get("meta") else {} %}
+{% endif %}
+
+# ==========================================
+# VARIABLE BINDINGS
+# ==========================================
+
+{% set ssh_key = meta.get("ssh_key") or custom_ssh_key %}
+{% set ssh_import_id = meta.get("ssh_import_id") or custom_ssh_import_id %}
+{% set sys_user = meta.get("sys_user") or custom_sys_user %}
+{% set password = meta.get("password") or custom_password %}
+{% set pro_token = meta.get("pro_token") or custom_pro_token %}
+{% set hostname_base = meta.get("hostname") or custom_hostname %}
+{% set tld = meta.get("tld") or custom_tld %}
+{% set timezone = meta.get("timezone") or custom_timezone %}
+
+{% set lxd_channel = meta.get("lxd_channel") or custom_lxd_channel %}
+
+{% set lxd_project = meta.get("lxd_project") or custom_lxd_project %}
+{% set lxd_pool = meta.get("lxd_pool") or custom_lxd_pool %}
+{% set lxd_cert_b64 = meta.get("lxd_cert_b64") %}
+{% set lxd_key_b64 = meta.get("lxd_key_b64") %}
+{% set lxd_bridge = meta.get("lxd_bridge") or custom_lxd_bridge %}
+{% set lxd_cidr = meta.get("lxd_cidr") or custom_lxd_cidr %}
+
+{% set node_ha = meta.get("node_ha") | default(custom_node_ha, true) | int %}
+{% set node_cpu = meta.get("node_cpu") or custom_node_cpu %}
+{% set node_ram = meta.get("node_ram") or custom_node_ram %}
+{% set node_disk = meta.get("node_disk") or custom_node_disk %}
+
+{% if meta.get("nested_lxd") is not none %}
+  {% set nested_lxd = (meta.get("nested_lxd") | string | lower == "true") %}
+{% else %}
+  {% set nested_lxd = (custom_nested_lxd | string | lower == "true") %}
+{% endif %}
+
+# ==========================================
+# CIDR GATEWAY AUTO-CALCULATOR
+# ==========================================
+
+{% set _lxd_cidr_parts = lxd_cidr.split('/') %}
+{% set _lxd_ip_octets = _lxd_cidr_parts[0].split('.') %}
+{% set lxd_gateway = _lxd_ip_octets[0] ~ '.' ~ _lxd_ip_octets[1] ~ '.' ~ _lxd_ip_octets[2] ~ '.1' %}
+{% set lxd_prefix = _lxd_cidr_parts[1] %}
+
+# ==========================================
+# DYNAMIC HA NODE GENERATOR
+# ==========================================
+
+{% set max_ha = [node_ha] | max %}
+
+{% set hostnames_list = [] %}
+{% set cpus_list = [] %}
+{% set rams_list = [] %}
+{% set disks_list = [] %}
+
+# 1. Generate Nodes
+{% for i in range(1, node_ha + 1) %}
+  {% set _ = hostnames_list.append("node-" ~ i) %}
+  {% set _ = cpus_list.append(node_cpu) %}
+  {% set _ = rams_list.append(node_ram) %}
+  {% set _ = disks_list.append(node_disk) %}
+{% endfor %}
+
+# Compile final strings
+{% set nodes_hostnames = hostnames_list | join(" ") %}
+{% set nodes_cpus = cpus_list | join(" ") %}
+{% set nodes_rams = rams_list | join(" ") %}
+{% set nodes_disks = disks_list | join(" ") %}
+
+# ==========================================
+# DYNAMIC STORAGE CALCULATOR
+# ==========================================
+
+# Dynamic Nested Storage Calculation
+{% set ns = namespace(total_storage=0) %}
+{% for disk in nodes_disks.split(' ') %}
+  {% set disk_val = disk | replace('GiB', '') | replace('GB', '') | int %}
+  {% set ns.total_storage = ns.total_storage + disk_val %}
+{% endfor %}
+
+# Add a 10GB buffer
+{% set final_total = ns.total_storage + 10 %}
+{% set nested_storage = final_total | string ~ 'GiB' %}
+
+# ==========================================
+# STANDARD CLOUD-INIT EXECUTION
+# ==========================================
+
+# Create Hostname / FQDN
+{% set base_name = local_hostname if hostname_base == "" else hostname_base %}
+{% if tld %}
+fqdn: {{ base_name }}.{{ tld }}
+prefer_fqdn_over_hostname: true
+{% else %}
+hostname: {{ base_name }}
+{% endif %}
+
+# Create user and config auth
+users:
+  - name: {{ sys_user }}
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: adm, sys, lxd, sudo
+    shell: /bin/bash
+{% if not ssh_key and not ssh_import_id %}
+    plain_text_passwd: "{{ password }}"
+    lock_passwd: false
+{% endif %}
+{% if ssh_key %}
+    ssh_authorized_keys:
+      - {{ ssh_key }}
+{% endif %}
+{% if ssh_import_id %}
+    ssh_import_id:
+      - {{ ssh_import_id }}
+{% endif %}
+
+# Enable SSH Password Auth ONLY if no keys are provided
+{% if not ssh_key and not ssh_import_id %}
+ssh_pwauth: true
+{% else %}
+ssh_pwauth: false
+{% endif %}
+
+# Config Ubuntu Pro
+{% if pro_token %}
+ubuntu_pro:
+  token: {{ pro_token }}
+{% endif %}
+
+{% if nested_lxd %}
+# If Nested: Seed the LXD database natively via cloud-init
+lxd:
+  preseed: |
+    config:
+      core.https_address: '[::]:8444'
+    networks:
+    - config:
+        ipv4.address: {{ lxd_gateway }}/{{ lxd_prefix }}
+        ipv4.dhcp: "true"
+        ipv4.nat: "true"
+        ipv6.address: none
+      description: "Bridge for LXD"
+      name: {{ lxd_bridge }}
+      type: bridge
+      project: default
+    storage_pools:
+    - config:
+        size: {{ nested_storage }}
+      description: "Nested ZFS Storage"
+      name: default
+      driver: zfs 
+    profiles:
+    - config:
+        limits.cpu: "2"
+        limits.memory: 6GiB
+      description: "Default LXD profile"
+      devices:
+        eth0:
+          name: eth0
+          network: {{ lxd_bridge }}
+          type: nic
+        root:
+          path: /
+          pool: default
+          type: disk
+      name: default
+    projects: []
+    cluster: null
+{% endif %}
+
+write_files:
+# Auto login script helper function (LXD)
+- path: /etc/profile.d/lxd-login.sh
+  permissions: '0644'
+  content: |
+    if [ "$USER" = "{{ sys_user }}" ]; then
+        
+        if command -v lxc >/dev/null 2>&1; then
+            {% if not nested_lxd %}
+            lxc remote switch host-lxd >/dev/null 2>&1 || true
+            {% endif %}
+            {% if lxd_project != "default" %}
+            lxc project switch {{ lxd_project }} >/dev/null 2>&1 || true
+            {% endif %}
+        fi
+    fi
+
+- path: /etc/profile.d/default-editor.sh
+  permissions: '0644'
+  content: |
+    export EDITOR=nvim
+
+- path: /etc/sudoers.d/keep-editor
+  permissions: '0440'
+  content: |
+    Defaults env_keep += "EDITOR"
+
+{% if not nested_lxd and lxd_cert_b64 and lxd_key_b64 %}
+# Non-nested specific files (Host's LXD Certificates)
+- path: /root/snap/lxd/common/config/client.crt
+  owner: root:root
+  permissions: '0644'
+  encoding: b64
+  content: {{ lxd_cert_b64 }}
+
+- path: /root/snap/lxd/common/config/client.key
+  owner: root:root
+  permissions: '0600'
+  encoding: b64
+  content: {{ lxd_key_b64 }}
+{% endif %}
+
+packages:
+  - git
+  - neovim
+  - pollinate
+  - jq
+
+snap:
+  commands:
+  - snap install lxd --channel={{ lxd_channel }}
+
+package_update: true
+package_upgrade: true
+package_reboot_if_required: true
+
+timezone: {{ timezone }}
+
+random_seed:
+  command: [pollinate]
+  command_required: true
+  file: /dev/urandom
+
+runcmd:
+
+# Verify critical dependencies
+- echo "\n\n-------- Verifying dependencies... --------\n"
+- |
+  for cmd in lxc jq; do
+    if ! command -v $cmd >/dev/null 2>&1; then
+      echo "CRITICAL ERROR: Required command '$cmd' not found."
+      echo "Snap/apt package installation likely failed due to a network error."
+      exit 1
+    fi
+  done
+  echo "All dependencies verified successfully!"
+
+# Export variables
+- echo "\n\n-------- Exporting variables... --------\n"
+
+# --- Networking ---
+- export IP_ADDRESS=$(hostname -I | awk '{print $1}')
+- export INTERFACE=$(ip -j route show default | jq -r '.[].dev')
+
+# --- Auth & System ---
+- export SSH_KEY="{{ ssh_import_id }}"
+- export RUN_AS="sudo -u {{ sys_user }}"
+- export RUN_AS_LOGIN="sudo -i -u {{ sys_user }}"
+
+# --- LXD Settings ---
+- export LXD_PROJECT="{{ lxd_project }}"
+- export LXD_POOL="{{ lxd_pool }}"
+{% if nested_lxd %}
+- export LXD_ADDR="${IP_ADDRESS}:8444"
+- export LXD_CERT="/root/lxd-local.crt"
+- export LXD_KEY="/root/lxd-local.key"
+{% else %}
+- export LXD_ADDR="{{ lxd_gateway }}:8443"
+- export LXD_CERT="/root/snap/lxd/common/config/client.crt"
+- export LXD_KEY="/root/snap/lxd/common/config/client.key"
+{% endif %}
+- export LXD_CIDR="{{ lxd_cidr }}"
+
+# --- Hardware Allocation ---
+- export NODE_HA="{{ node_ha }}"
+- export MAX_HA="{{ max_ha }}"
+
+- export NODES_HOSTNAMES="{{ nodes_hostnames }}"
+- export NODES_CPUS="{{ nodes_cpus }}"
+- export NODES_RAMS="{{ nodes_rams }}"
+- export NODES_DISKS="{{ nodes_disks }}"
+
+{% if nested_lxd %}
+
+# Generate local LXD trust certificate
+- echo "\n\n-------- Generating trust certificate for local LXD... --------\n"
+
+- openssl req -x509 -newkey rsa:2048 -keyout $LXD_KEY -out $LXD_CERT -nodes -days 3650 -subj "/CN=lxd-local"
+- lxc config trust add $LXD_CERT --name lxd-local
+
+# Provide certs to user context
+- $RUN_AS mkdir -p /home/{{ sys_user }}/snap/lxd/common/config
+- cp $LXD_CERT /home/{{ sys_user }}/snap/lxd/common/config/client.crt
+- cp $LXD_KEY /home/{{ sys_user }}/snap/lxd/common/config/client.key
+- chown -R {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/snap/lxd/common/config
+
+{% else %}
+
+# Setup external LXD client certificates and remote connection
+- echo "\n\n-------- Configuring remote LXD connection... --------\n"
+
+- lxc remote add host-lxd https://$LXD_ADDR --accept-certificate
+- lxc remote switch host-lxd
+
+# Provide certs to user context
+- $RUN_AS mkdir -p /home/{{ sys_user }}/snap/lxd/common/config
+- cp $LXD_CERT /home/{{ sys_user }}/snap/lxd/common/config/client.crt
+- cp $LXD_KEY /home/{{ sys_user }}/snap/lxd/common/config/client.key
+- chown -R {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/snap/lxd/common/config
+- $RUN_AS lxc remote add host-lxd https://$LXD_ADDR --accept-certificate
+
+{% endif %}
+
+
+{% if lxd_project != "default" %}
+
+# Switch to LXD project
+- echo "\n\n-------- Switching to LXD '$LXD_PROJECT' project... --------\n"
+
+- lxc project switch $LXD_PROJECT
+
+{% endif %}
+
+# Create VMs directly via LXD
+- echo "\n\n-------- Creating VMs in LXD... --------\n"
+- |
+  i=1
+  for HOST in $NODES_HOSTNAMES; do
+    CPU=$(echo "$NODES_CPUS" | cut -d' ' -f$i)
+    RAM=$(echo "$NODES_RAMS" | cut -d' ' -f$i)
+    DISK=$(echo "$NODES_DISKS" | cut -d' ' -f$i)
+    
+    lxc init "$HOST" --vm -c limits.cpu="$CPU" -c limits.memory="$RAM" -d root,size="$DISK"
+    
+    i=$((i + 1))
+  done
+
+# Start VMs
+- echo "\n\n-------- Starting VMs... --------\n"
+- |
+  for HOST in $NODES_HOSTNAMES; do
+    lxc start $HOST
+  done
+
+- sleep 10
+- lxc list
+
+- echo "\n\n-------- Finished deploying LXD, have fun!... --------\n"
+
