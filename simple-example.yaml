@@ -1,0 +1,163 @@
+## template: jinja
+#cloud-config
+
+# ---
+# simple-example transcript: Automated scalable cloud-init install of a simple example
+# version: 1.0.0
+#
+# Made by: Pablo Gonzalez De Greiff @ Canonical
+# ---
+
+# ==========================================
+# DEFAULT JINJA CONFIGURATIONS
+# ==========================================
+
+# --- Auth & System ---
+{% set custom_repro_name = "simple-example" %}
+{% set custom_vm_name = "example" %}
+{% set custom_vm_image = "ubuntu:24.04" %}
+{% set custom_ssh_key = "" %}
+{% set custom_ssh_import_id = "" %}
+{% set custom_sys_user = "ubuntu" %}                # PROMPT:System User
+{% set custom_password = "ubuntu" %}                # PROMPT:System Password
+{% set custom_pro_token = "" %}                     # PROMPT:Pro Token
+{% set custom_hostname = "" %}                      # PROMPT:Hostname
+{% set custom_tld = "" %}                           # PROMPT:Top Level Domain
+{% set custom_timezone = "America/New_York" %}      # PROMPT:Timezone
+
+# --- LXD Settings ---
+{% set custom_lxd_project = "default" %}
+{% set custom_lxd_pool = "default" %}               # PROMPT:LXD Storage Pool
+{% set custom_lxd_bridge = "lbr0" %}                # PROMPT:LXD Bridge Name [BRIDGE:dhcp=true,cidr=lxd_cidr]
+{% set custom_lxd_cidr = "10.10.0.0/22" %}
+
+# --- Hardware Allocation ---
+# Total: ( CPU = 4 | RAM = 8GiB | DISK = 30GiB )
+
+# Primary VM
+{% set custom_primary_cpu = "4" %}                  # PROMPT:Primary VM CPU cores
+{% set custom_primary_ram = "8GiB" %}               # PROMPT:Primary VM RAM
+{% set custom_primary_disk = "30GiB" %}             # PROMPT:Primary VM Root Disk
+
+# ==========================================
+# DATASOURCE PARSER (LXD vs Cloud)
+# ==========================================
+
+{% if cloud_name == "lxd" %}
+  {% set meta = {} %}
+  {% for key, value in ds.config.items() %}
+    {% if key.startswith("user_") %}
+      {% set _ = meta.__setitem__(key[5:], value) %}
+    {% endif %}
+  {% endfor %}
+{% else %}
+  {% set meta = ds.meta_data.get("meta") if ds.meta_data.get("meta") else {} %}
+{% endif %}
+
+# ==========================================
+# VARIABLE BINDINGS
+# ==========================================
+
+{% set ssh_key = meta.get("ssh_key") or custom_ssh_key %}
+{% set ssh_import_id = meta.get("ssh_import_id") or custom_ssh_import_id %}
+{% set sys_user = meta.get("sys_user") or custom_sys_user %}
+{% set password = meta.get("password") or custom_password %}
+{% set pro_token = meta.get("pro_token") or custom_pro_token %}
+{% set hostname_base = meta.get("hostname") or custom_hostname %}
+{% set tld = meta.get("tld") or custom_tld %}
+{% set timezone = meta.get("timezone") or custom_timezone %}
+
+{% set lxd_project = meta.get("lxd_project") or custom_lxd_project %}
+{% set lxd_pool = meta.get("lxd_pool") or custom_lxd_pool %}
+{% set lxd_bridge = meta.get("lxd_bridge") or custom_lxd_bridge %}
+{% set lxd_cidr = meta.get("lxd_cidr") or custom_lxd_cidr %}
+
+# ==========================================
+# STANDARD CLOUD-INIT EXECUTION
+# ==========================================
+
+# Create Hostname / FQDN
+{% set base_name = local_hostname if hostname_base == "" else hostname_base %}
+{% if tld %}
+fqdn: {{ base_name }}.{{ tld }}
+prefer_fqdn_over_hostname: true
+{% else %}
+hostname: {{ base_name }}
+{% endif %}
+
+# Create user and config auth
+users:
+  - name: {{ sys_user }}
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: adm, sys, lxd, sudo
+    shell: /bin/bash
+{% if not ssh_key and not ssh_import_id %}
+    plain_text_passwd: "{{ password }}"
+    lock_passwd: false
+{% endif %}
+{% if ssh_key %}
+    ssh_authorized_keys:
+      - {{ ssh_key }}
+{% endif %}
+{% if ssh_import_id %}
+    ssh_import_id:
+      - {{ ssh_import_id }}
+{% endif %}
+
+# Enable SSH Password Auth ONLY if no keys are provided
+{% if not ssh_key and not ssh_import_id %}
+ssh_pwauth: true
+{% else %}
+ssh_pwauth: false
+{% endif %}
+
+# Config Ubuntu Pro
+{% if pro_token %}
+ubuntu_pro:
+  token: {{ pro_token }}
+{% endif %}
+
+write_files:
+- path: /etc/profile.d/default-editor.sh
+  permissions: '0644'
+  content: |
+    export EDITOR=nvim
+
+- path: /etc/sudoers.d/keep-editor
+  permissions: '0440'
+  content: |
+    Defaults env_keep += "EDITOR"
+
+packages:
+  - git
+  - neovim
+  - pollinate
+  - jq
+
+package_update: true
+package_upgrade: true
+package_reboot_if_required: true
+
+timezone: {{ timezone }}
+
+random_seed:
+  command: [pollinate]
+  command_required: true
+  file: /dev/urandom
+
+runcmd:
+
+# Verify critical dependencies
+- echo "\n\n-------- Verifying dependencies... --------\n"
+- |
+  for cmd in jq; do
+    if ! command -v $cmd >/dev/null 2>&1; then
+      echo "CRITICAL ERROR: Required command '$cmd' not found."
+      echo "Snap/apt package installation likely failed due to a network error."
+      exit 1
+    fi
+  done
+  echo "All dependencies verified successfully!"
+
+- echo "\n\n-------- Finished deploying Simple-Example, have fun!... --------\n"
+
