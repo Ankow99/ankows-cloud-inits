@@ -70,8 +70,9 @@
 {% set custom_node_ram = "8GiB" %}                  # PROMPT:Machine RAM
 {% set custom_node_disk = "30GiB" %}                # PROMPT:Machine Root Disk
 
-# Juju status watch trigger message (leave empty to ignore)
+# Juju watch trigger message and models (space separated, order matters)
 {% set custom_juju_trigger = "" %}
+{% set custom_juju_models = "juju-test-model" %}
 
 # ==========================================
 # DATASOURCE PARSER (LXD vs Cloud)
@@ -572,6 +573,8 @@ runcmd:
 - export NODES_RAMS="{{ nodes_rams }}"
 - export NODES_DISKS="{{ nodes_disks }}"
 
+- export JUJU_MODEL="{{ custom_juju_models.split()[0] }}"
+
 # --- Dynamic IP Subnet Slicing ---
 - echo "\n\n-------- Calculating Payload IP Allocations --------\n"
 - |
@@ -947,7 +950,7 @@ runcmd:
     SYSTEM_ID=$(maas $ADMIN_USER machines read hostname=$HOST | jq -r '.[0].system_id')
 
     # Tag main disks as SSDs
-    echo "\n\n-------- Tagging main disks as SSDs... --------\n"
+    echo "\n\n-------- Tagging main disks as SSDs for '$HOST'... --------\n"
     
     MAIN_BLOCK_ID=$(maas $ADMIN_USER block-devices read $SYSTEM_ID | jq -r '.[] | select(.serial == "lxd_root" or .name == "sda" or .name == "vda") | .id' | head -n 1)
     if [ -n "$MAIN_BLOCK_ID" ] && [ "$MAIN_BLOCK_ID" != "null" ]; then
@@ -955,6 +958,8 @@ runcmd:
       maast $ADMIN_USER block-device remove-tag $SYSTEM_ID $MAIN_BLOCK_ID tag=rotary
       maast $ADMIN_USER block-device remove-tag $SYSTEM_ID $MAIN_BLOCK_ID tag=1rpm
     fi
+    
+    echo "\n\n-------- Tagging '$HOST'... --------\n"
     
     case "$HOST" in
       juju-controller-*)
@@ -1029,7 +1034,7 @@ runcmd:
 # Create Juju Model
 - echo "\n\n-------- Creating Juju Test Model... --------\n"
 
-- $RUN_AS juju add-model --config default-base=$JUJU_BASE juju-test-model
+- $RUN_AS juju add-model --config default-base=$JUJU_BASE $JUJU_MODEL
 
 # ------------------------------------------------- Deploy Machines -------------------------------------------------
 - echo "\n\n-------- Deploying Juju Machines... --------\n"

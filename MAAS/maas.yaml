@@ -62,9 +62,6 @@
 {% set custom_node_ram = "8GiB" %}                  # PROMPT:Machine RAM
 {% set custom_node_disk = "30GiB" %}                # PROMPT:Machine Root Disk
 
-# Juju status watch trigger message (leave empty to ignore)
-{% set custom_juju_trigger = "" %}
-
 # ==========================================
 # DATASOURCE PARSER (LXD vs Cloud)
 # ==========================================
@@ -919,7 +916,7 @@ runcmd:
     SYSTEM_ID=$(maas $ADMIN_USER machines read hostname=$HOST | jq -r '.[0].system_id')
 
     # Tag main disks as SSDs
-    echo "\n\n-------- Tagging main disks as SSDs... --------\n"
+    echo "\n\n-------- Tagging main disks as SSDs for '$HOST'... --------\n"
     
     MAIN_BLOCK_ID=$(maas $ADMIN_USER block-devices read $SYSTEM_ID | jq -r '.[] | select(.serial == "lxd_root" or .name == "sda" or .name == "vda") | .id' | head -n 1)
     if [ -n "$MAIN_BLOCK_ID" ] && [ "$MAIN_BLOCK_ID" != "null" ]; then
@@ -927,6 +924,8 @@ runcmd:
       maast $ADMIN_USER block-device remove-tag $SYSTEM_ID $MAIN_BLOCK_ID tag=rotary
       maast $ADMIN_USER block-device remove-tag $SYSTEM_ID $MAIN_BLOCK_ID tag=1rpm
     fi
+    
+    echo "\n\n-------- Tagging '$HOST'... --------\n"
     
     # Base tag for all nodes
     maast $ADMIN_USER tag update-nodes machine add=$SYSTEM_ID

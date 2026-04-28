@@ -85,8 +85,9 @@
 {% set custom_cloud_osd_disk = "30GiB" %}           # PROMPT:Cloud Node OSD Disk (Each)
 {% set custom_cloud_osd_count = 4 %}                # PROMPT:Number of OSDs per Cloud Node
 
-# Juju status watch trigger message (leave empty to ignore)
+# Juju watch trigger message and models (space separated, order matters)
 {% set custom_juju_trigger = "-------- Bootstrapping the orchestration layer... --------" %}
+{% set custom_juju_models = "openstack openstack-machines openstack-infra" %}
 
 # ==========================================
 # DATASOURCE PARSER (LXD vs Cloud)
@@ -1049,7 +1050,7 @@ runcmd:
     SYSTEM_ID=$(maas $ADMIN_USER machines read hostname=$HOST | jq -r '.[0].system_id')
 
     # Tag main disks as SSDs
-    echo "\n\n-------- Tagging main disks as SSDs... --------\n"
+    echo "\n\n-------- Tagging main disks as SSDs for '$HOST'... --------\n"
     
     MAIN_BLOCK_ID=$(maas $ADMIN_USER block-devices read $SYSTEM_ID | jq -r '.[] | select(.serial == "lxd_root" or .name == "sda" or .name == "vda") | .id' | head -n 1)
     if [ -n "$MAIN_BLOCK_ID" ] && [ "$MAIN_BLOCK_ID" != "null" ]; then
@@ -1057,6 +1058,8 @@ runcmd:
       maast $ADMIN_USER block-device remove-tag $SYSTEM_ID $MAIN_BLOCK_ID tag=rotary
       maast $ADMIN_USER block-device remove-tag $SYSTEM_ID $MAIN_BLOCK_ID tag=1rpm
     fi
+    
+    echo "\n\n-------- Tagging '$HOST'... --------\n"
     
     # Base tag for all nodes
     maast $ADMIN_USER tag update-nodes openstack-${OS_DEPLOYMENT_NAME} add=$SYSTEM_ID
@@ -1077,7 +1080,7 @@ runcmd:
         maast $ADMIN_USER tag update-nodes network add=$SYSTEM_ID
         
         # Tag the ceph osd devices
-        echo "\n\n-------- Tagging ceph storage... --------\n"
+        echo "\n\n-------- Tagging ceph storage for '$HOST'... --------\n"
         
         for i in $(seq 1 $OSDS_PER_NODE); do
           OSD_BLOCK_ID=$(maas $ADMIN_USER block-devices read $SYSTEM_ID | jq -r '.[] | select(.serial == "lxd_osd'${i}'") | .id')
@@ -1091,7 +1094,7 @@ runcmd:
         done
         
         # Tag the additional neutron interface
-        echo "\n\n-------- Tagging neutron interface... --------\n"
+        echo "\n\n-------- Tagging neutron interface for '$HOST'... --------\n"
         
         CLOUD_NEUTRON_MAC=$(lxc config get $HOST volatile.eth1.hwaddr)
         CLOUD_NEUTRON_INTERFACE_ID=$(maas $ADMIN_USER interfaces read $SYSTEM_ID | jq -r '.[] | select(.mac_address=="'$CLOUD_NEUTRON_MAC'") | .id')

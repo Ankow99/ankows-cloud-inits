@@ -595,8 +595,9 @@ IMAGE=$(get_default "vm_image")
 VOLATILE_CERT_NAME="${REPRO_NAME}-cert-${DEPLOY_ID}"
 MUX_SOCKET="/tmp/${REPRO_NAME}-ssh-${DEPLOY_ID}.sock"
 
-# Juju status trigger message
+# Obtain Juju watch variables
 JUJU_TRIGGER_MSG=$(get_default "juju_trigger")
+JUJU_MODELS=$(get_default "juju_models")
 
 if [ "$ACCEPT_DEFAULTS" = false ]; then
     echo -e "${BYELLOW}-> -------- Dynamic ${PRETTY_REPRO} Payload Configuration ---------${NC}"
@@ -1285,10 +1286,23 @@ while [ "$PHASE" != "DONE" ]; do
 
     # PHASE B: JUJU WATCH
     if [ "$PHASE" == "JUJU_WATCH" ]; then
-
-        # This command attempts to query the models in reverse order of creation
-        JUJU_CMD="juju status -m openstack --color 2>/dev/null || juju status -m openstack-machines --color 2>/dev/null || juju status -m openstack-infra --color 2>/dev/null || juju status -m controller --color 2>/dev/null || echo 'Waiting for Juju models to initialize...'"
-
+        
+        # Dynamically construct the Juju status command based on defined models
+        if [ -n "$JUJU_MODELS" ]; then
+            JUJU_CMD=""
+            for model in $JUJU_MODELS; do
+                if [ -z "$JUJU_CMD" ]; then
+                    JUJU_CMD="juju status -m $model --color 2>/dev/null"
+                else
+                    JUJU_CMD="$JUJU_CMD || juju status -m $model --color 2>/dev/null"
+                fi
+            done
+            JUJU_CMD="$JUJU_CMD || juju status -m controller --color 2>/dev/null || echo 'Waiting for Juju models to initialize...'"
+        else
+            # Universal fallback if the payload doesn't define specific models
+            JUJU_CMD="juju status --color 2>/dev/null || juju status -m controller --color 2>/dev/null || echo 'Waiting for Juju models to initialize...'"
+        fi
+        
         # Capture both status commands first
         # shellcheck disable=SC2029
         JUJU_OUTPUT=$(ssh "${SSH_OPTS[@]}" "${SYS_USER}@$IP" "$JUJU_CMD" 2>/dev/null)
