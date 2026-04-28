@@ -17,8 +17,8 @@
 
 # --- Auth & System ---
 {% set custom_repro_name = "lxd" %}
-{% set custom_vm_name = "node-1" %}
-{% set custom_vm_image = "ubuntu:24.04" %}
+{% set custom_vm_name = "node-0" %}
+{% set custom_vm_image = "ubuntu:24.04" %}          # PROMPT:VM Image
 {% set custom_ssh_key = "" %}
 {% set custom_ssh_import_id = "" %}
 {% set custom_sys_user = "ubuntu" %}                # PROMPT:System User
@@ -73,6 +73,7 @@
 # VARIABLE BINDINGS
 # ==========================================
 
+{% set vm_image = meta.get("vm_image") or custom_vm_image %}
 {% set ssh_key = meta.get("ssh_key") or custom_ssh_key %}
 {% set ssh_import_id = meta.get("ssh_import_id") or custom_ssh_import_id %}
 {% set sys_user = meta.get("sys_user") or custom_sys_user %}
@@ -325,6 +326,7 @@ runcmd:
 - export SSH_KEY="{{ ssh_import_id }}"
 - export RUN_AS="sudo -u {{ sys_user }}"
 - export RUN_AS_LOGIN="sudo -i -u {{ sys_user }}"
+- export VM_IMAGE="{{ vm_image }}"
 
 # --- LXD Settings ---
 - export LXD_PROJECT="{{ lxd_project }}"
@@ -399,7 +401,7 @@ runcmd:
     RAM=$(echo "$NODES_RAMS" | cut -d' ' -f$i)
     DISK=$(echo "$NODES_DISKS" | cut -d' ' -f$i)
     
-    lxc init "$HOST" --vm -c limits.cpu="$CPU" -c limits.memory="$RAM" -d root,size="$DISK"
+    lxc init "$VM_IMAGE" "$HOST" --vm -c limits.cpu="$CPU" -c limits.memory="$RAM" -d root,size="$DISK"
     
     i=$((i + 1))
   done

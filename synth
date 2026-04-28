@@ -1369,31 +1369,37 @@ echo -e "\033[?25h"
 # ==========================================
 
 # 6. MAAS Dashboard Access (SSH-Aware)
-echo ""
-echo -e "${BYELLOW}-> 6. Opening MAAS Dashboard...${NC}"
-echo ""
-
-MAAS_UI_URL="http://$IP:5240/MAAS/"
-
-echo -e "${BYELLOW}  MAAS Dashboard:${NC} $MAAS_UI_URL"
-echo ""
-
-if [ -n "$SSH_CLIENT" ] || [ -n "$SSH_TTY" ]; then
-    REMOTE_USER=$(whoami)
-    
-    echo -e "${BYELLOW}  Remote SSH Session Detected!${NC}"
-    echo "  To access the MAAS dashboard locally, open a new terminal tab on your host and run:"
+if grep -q "custom_maas_" "$CLOUD_INIT"; then
     echo ""
-    echo -e "${BYELLOW}  Run:${NC} ssh -N -L 5240:$IP:5240 ${REMOTE_USER}@<SERVER_IP>"
-    echo -e "${BYELLOW}  URL:${NC} http://localhost:5240/MAAS/"
+    echo -e "${BYELLOW}-> 6. Opening MAAS Dashboard...${NC}"
     echo ""
-    
-    pause_to_continue "Press Enter to drop into the final interactive shell..."
-else
-    echo -e "${BYELLOW}  Local session detected. Opening MAAS Dashboard...${NC}"
-    if command -v xdg-open &> /dev/null; then
-        xdg-open "$MAAS_UI_URL" > /dev/null 2>&1 &
+
+    MAAS_UI_URL="http://$IP:5240/MAAS/"
+
+    echo -e "${BYELLOW}  MAAS Dashboard:${NC} $MAAS_UI_URL"
+    echo ""
+
+    if [ -n "$SSH_CLIENT" ] || [ -n "$SSH_TTY" ]; then
+        REMOTE_USER=$(whoami)
+        
+        echo -e "${BYELLOW}  Remote SSH Session Detected!${NC}"
+        echo "  To access the MAAS dashboard locally, open a new terminal tab on your host and run:"
+        echo ""
+        echo -e "${BYELLOW}  Run:${NC} ssh -N -L 5240:$IP:5240 ${REMOTE_USER}@<SERVER_IP>"
+        echo -e "${BYELLOW}  URL:${NC} http://localhost:5240/MAAS/"
+        echo ""
+        
+        pause_to_continue "Press Enter to drop into the final interactive shell..."
+    else
+        echo -e "${BYELLOW}  Local session detected. Opening MAAS Dashboard...${NC}"
+        if command -v xdg-open &> /dev/null; then
+            xdg-open "$MAAS_UI_URL" > /dev/null 2>&1 &
+        fi
     fi
+else
+    echo ""
+    echo -e "${BYELLOW}-> 6. Skipping MAAS Dashboard... (no MAAS detected)${NC}"
+    echo ""
 fi
 
 # ==========================================
