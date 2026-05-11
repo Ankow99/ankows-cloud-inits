@@ -1,0 +1,1279 @@
+## template: jinja
+#cloud-config
+
+# ---
+# kubeadm transcript: Automated scalable cloud-init install of Kubernetes using kubeadm
+# version: 1.0.0
+#
+# Made by: Pablo Gonzalez De Greiff @ Canonical
+# ---
+
+# ==========================================
+# DEFAULT JINJA CONFIGURATIONS
+# ==========================================
+
+# --- Architecture Toggle ---
+{% set custom_nested_lxd = True %}
+{% set custom_maas_snap = True %}
+
+# --- Auth & System ---
+{% set custom_repro_name = "kubeadm" %}
+{% set custom_vm_name = "maas-1" %}
+{% set custom_vm_image = "ubuntu:24.04" %}
+{% set custom_ssh_key = "" %}
+{% set custom_ssh_import_id = "" %}
+{% set custom_sys_user = "ubuntu" %}                # PROMPT:System User
+{% set custom_password = "ubuntu" %}                # PROMPT:System Password
+{% set custom_pro_token = "" %}                     # PROMPT:Pro Token
+{% set custom_hostname = "" %}                      # PROMPT:Hostname
+{% set custom_tld = "" %}                           # PROMPT:Top Level Domain
+{% set custom_timezone = "America/New_York" %}      # PROMPT:Timezone
+
+# --- Channels ---
+{% set custom_lxd_channel = "5.21/stable" %}        # PROMPT:LXD Channel
+{% set custom_maas_channel = "3.7/stable" %}        # PROMPT:MAAS Channel
+{% set custom_k8s_version = "v1.36" %}              # PROMPT:Kubernetes Version
+
+# --- LXD Settings ---
+{% set custom_lxd_project = "default" %}
+{% set custom_lxd_pool = "default" %}               # PROMPT:LXD Storage Pool
+
+# --- MAAS Settings ---
+{% set custom_maas_db_name = "maas_db" %}
+{% set custom_maas_user = "admin" %}                # PROMPT:MAAS Admin User
+{% set custom_maas_password = "admin" %}            # PROMPT:MAAS Admin Password
+{% set custom_maas_email = "admin@email.com" %}     # PROMPT:MAAS Admin Email
+{% set custom_maas_images = "noble jammy" %}        # PROMPT:MAAS Deploy Images (space separated)
+{% set custom_maas_dns = "8.8.8.8" %}               # PROMPT:MAAS DNS Forwarder
+{% set custom_maas_bridge = "mbr0" %}               # PROMPT:MAAS Bridge Name [BRIDGE:dhcp=false,cidr=maas_cidr]
+{% set custom_maas_cidr = "10.10.0.0/22" %}
+{% set custom_maas_ip_count = 30 %}                 # PROMPT:MAAS Reserved IP Pool Size
+
+# --- Hardware Allocation ---
+# Total: ( CPU = 16 | RAM = 38GiB | DISK = 210GiB )
+
+# MAAS Controller
+{% set custom_maas_cpu = "4" %}                     # PROMPT:MAAS Server CPU cores
+{% set custom_maas_ram = "8GiB" %}                  # PROMPT:MAAS Server RAM
+{% set custom_maas_disk = "30GiB" %}                # PROMPT:MAAS Server Root Disk
+
+# K8S Control Plane Defaults per node
+{% set custom_control_ha = 3 %}                     # PROMPT:Number of K8S Control Planes
+{% set custom_control_cpu = "2" %}                  # PROMPT:Control Plane CPU cores
+{% set custom_control_ram = "4GiB" %}               # PROMPT:Control Plane RAM
+{% set custom_control_disk = "30GiB" %}             # PROMPT:Control Plane Root Disk
+
+# K8S Worker Defaults per node
+{% set custom_worker_ha = 3 %}                      # PROMPT:Number of K8S Worker Nodes
+{% set custom_worker_cpu = "2" %}                   # PROMPT:Worker Node CPU cores
+{% set custom_worker_ram = "6GiB" %}                # PROMPT:Worker Node RAM
+{% set custom_worker_disk = "30GiB" %}              # PROMPT:Worker Node Root Disk
+
+# ==========================================
+# DATASOURCE PARSER (LXD vs Cloud)
+# ==========================================
+
+{% if cloud_name == "lxd" %}
+  {% set meta = {} %}
+  {% for key, value in ds.config.items() %}
+    {% if key.startswith("user_") %}
+      {% set _ = meta.__setitem__(key[5:], value) %}
+    {% endif %}
+  {% endfor %}
+{% else %}
+  {% set meta = ds.meta_data.get("meta") if ds.meta_data.get("meta") else {} %}
+{% endif %}
+
+# ==========================================
+# VARIABLE BINDINGS
+# ==========================================
+
+{% set ssh_key = meta.get("ssh_key") or custom_ssh_key %}
+{% set ssh_import_id = meta.get("ssh_import_id") or custom_ssh_import_id %}
+{% set sys_user = meta.get("sys_user") or custom_sys_user %}
+{% set password = meta.get("password") or custom_password %}
+{% set pro_token = meta.get("pro_token") or custom_pro_token %}
+{% set hostname_base = meta.get("hostname") or custom_hostname %}
+{% set tld = meta.get("tld") or custom_tld %}
+{% set timezone = meta.get("timezone") or custom_timezone %}
+
+{% set lxd_channel = meta.get("lxd_channel") or custom_lxd_channel %}
+{% set maas_channel = meta.get("maas_channel") or custom_maas_channel %}
+{% set k8s_version = meta.get("k8s_version") or custom_k8s_version %}
+
+{% set lxd_project = meta.get("lxd_project") or custom_lxd_project %}
+{% set lxd_pool = meta.get("lxd_pool") or custom_lxd_pool %}
+{% set lxd_cert_b64 = meta.get("lxd_cert_b64") %}
+{% set lxd_key_b64 = meta.get("lxd_key_b64") %}
+
+{% set maas_db_name = meta.get("maas_db_name") or custom_maas_db_name %}
+{% set maas_user = meta.get("maas_user") or custom_maas_user %}
+{% set maas_password = meta.get("maas_password") or custom_maas_password %}
+{% set maas_email = meta.get("maas_email") or custom_maas_email %}
+{% set maas_images = meta.get("maas_images") or custom_maas_images %}
+{% set maas_dns = meta.get("maas_dns") or custom_maas_dns %}
+{% set maas_bridge = meta.get("maas_bridge") or custom_maas_bridge %}
+{% set maas_cidr = meta.get("maas_cidr") or custom_maas_cidr %}
+{% set maas_ip_count = meta.get("maas_ip_count") | default(custom_maas_ip_count, true) | int %}
+
+{% set control_ha = meta.get("control_ha") | default(custom_control_ha, true) | int %}
+{% set control_cpu = meta.get("control_cpu") or custom_control_cpu %}
+{% set control_ram = meta.get("control_ram") or custom_control_ram %}
+{% set control_disk = meta.get("control_disk") or custom_control_disk %}
+
+{% set worker_ha = meta.get("worker_ha") | default(custom_worker_ha, true) | int %}
+{% set worker_cpu = meta.get("worker_cpu") or custom_worker_cpu %}
+{% set worker_ram = meta.get("worker_ram") or custom_worker_ram %}
+{% set worker_disk = meta.get("worker_disk") or custom_worker_disk %}
+
+{% if meta.get("maas_snap") is not none %}
+  {% set maas_snap = (meta.get("maas_snap") | string | lower == "true") %}
+{% else %}
+  {% set maas_snap = (custom_maas_snap | string | lower == "true") %}
+{% endif %}
+
+{% if meta.get("nested_lxd") is not none %}
+  {% set nested_lxd = (meta.get("nested_lxd") | string | lower == "true") %}
+{% else %}
+  {% set nested_lxd = (custom_nested_lxd | string | lower == "true") %}
+{% endif %}
+
+# ==========================================
+# CIDR GATEWAY AUTO-CALCULATOR
+# ==========================================
+
+{% set _maas_cidr_parts = maas_cidr.split('/') %}
+{% set _maas_ip_octets = _maas_cidr_parts[0].split('.') %}
+{% set maas_gateway = _maas_ip_octets[0] ~ '.' ~ _maas_ip_octets[1] ~ '.' ~ _maas_ip_octets[2] ~ '.1' %}
+{% set maas_prefix = _maas_cidr_parts[1] %}
+
+# ==========================================
+# DYNAMIC HA NODE GENERATOR
+# ==========================================
+
+{% set max_ha = [control_ha, worker_ha] | max %}
+
+{% set hostnames_list = [] %}
+{% set cpus_list = [] %}
+{% set rams_list = [] %}
+{% set disks_list = [] %}
+
+# 1. Generate Control Plane Nodes
+{% for i in range(1, control_ha + 1) %}
+  {% set _ = hostnames_list.append("control-plane-" ~ i) %}
+  {% set _ = cpus_list.append(control_cpu) %}
+  {% set _ = rams_list.append(control_ram) %}
+  {% set _ = disks_list.append(control_disk) %}
+{% endfor %}
+
+# 2. Generate Worker Nodes
+{% for i in range(1, worker_ha + 1) %}
+  {% set _ = hostnames_list.append("worker-node-" ~ i) %}
+  {% set _ = cpus_list.append(worker_cpu) %}
+  {% set _ = rams_list.append(worker_ram) %}
+  {% set _ = disks_list.append(worker_disk) %}
+{% endfor %}
+
+# Compile final strings
+{% set nodes_hostnames = hostnames_list | join(" ") %}
+{% set nodes_cpus = cpus_list | join(" ") %}
+{% set nodes_rams = rams_list | join(" ") %}
+{% set nodes_disks = disks_list | join(" ") %}
+
+# ==========================================
+# DYNAMIC STORAGE CALCULATOR
+# ==========================================
+
+# Dynamic Nested Storage Calculation
+{% set ns = namespace(total_storage=0) %}
+{% for disk in nodes_disks.split(' ') %}
+  {% set disk_val = disk | replace('GiB', '') | replace('GB', '') | int %}
+  {% set ns.total_storage = ns.total_storage + disk_val %}
+{% endfor %}
+
+# Add a 10GB buffer
+{% set final_total = ns.total_storage + 10 %}
+{% set nested_storage = final_total | string ~ 'GiB' %}
+
+# ==========================================
+# STANDARD CLOUD-INIT EXECUTION
+# ==========================================
+
+# Create Hostname / FQDN
+{% set base_name = local_hostname if hostname_base == "" else hostname_base %}
+{% if tld %}
+fqdn: {{ base_name }}.{{ tld }}
+prefer_fqdn_over_hostname: true
+{% else %}
+hostname: {{ base_name }}
+{% endif %}
+
+# Create user and config auth
+users:
+  - name: {{ sys_user }}
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: adm, sys, lxd, sudo
+    shell: /bin/bash
+{% if not ssh_key and not ssh_import_id %}
+    plain_text_passwd: "{{ password }}"
+    lock_passwd: false
+{% endif %}
+{% if ssh_key %}
+    ssh_authorized_keys:
+      - {{ ssh_key }}
+{% endif %}
+{% if ssh_import_id %}
+    ssh_import_id:
+      - {{ ssh_import_id }}
+{% endif %}
+
+# Enable SSH Password Auth ONLY if no keys are provided
+{% if not ssh_key and not ssh_import_id %}
+ssh_pwauth: true
+{% else %}
+ssh_pwauth: false
+{% endif %}
+
+# Config Ubuntu Pro
+{% if pro_token %}
+ubuntu_pro:
+  token: {{ pro_token }}
+{% endif %}
+
+{% if nested_lxd %}
+# If Nested: Seed the LXD database natively via cloud-init
+lxd:
+  preseed: |
+    config:
+      core.https_address: '[::]:8444'
+    networks:
+    - config:
+        ipv4.address: {{ maas_gateway }}/{{ maas_prefix }}
+        ipv4.dhcp: "false"
+        ipv4.nat: "true"
+        ipv6.address: none
+      description: "Non-DHCP NAT bridge for MAAS"
+      name: {{ maas_bridge }}
+      type: bridge
+      project: default
+    storage_pools:
+    - config:
+        size: {{ nested_storage }}
+      description: "Nested ZFS Storage"
+      name: default
+      driver: zfs 
+    profiles:
+    - config:
+        limits.cpu: "2"
+        limits.memory: 6GiB
+      description: "Default LXD profile"
+      devices:
+        eth0:
+          name: eth0
+          network: {{ maas_bridge }}
+          type: nic
+        root:
+          path: /
+          pool: default
+          type: disk
+      name: default
+    projects: []
+    cluster: null
+{% endif %}
+
+write_files:
+# Auto login script helper function (MAAS - LXD)
+- path: /etc/profile.d/maas-login.sh
+  permissions: '0644'
+  content: |
+    if [ "$USER" = "{{ sys_user }}" ]; then
+        ADMIN_USER="{{ maas_user }}"
+        if command -v maas >/dev/null 2>&1 && sudo maas apikey --username $ADMIN_USER >/dev/null 2>&1; then
+            maas login $ADMIN_USER 'http://localhost:5240/MAAS/' $(sudo maas apikey --username $ADMIN_USER) >/dev/null 2>&1
+        fi
+
+        if command -v lxc >/dev/null 2>&1; then
+            : # Prevent bash syntax error if Jinja strips the lines below
+            {% if not nested_lxd %}
+            lxc remote switch host-lxd >/dev/null 2>&1 || true
+            {% endif %}
+            {% if lxd_project != "default" %}
+            lxc project switch {{ lxd_project }} >/dev/null 2>&1 || true
+            {% endif %}
+        fi
+    fi
+
+# MAAS Pretty table JSON parser - maast()
+- path: /usr/local/bin/maast
+  permissions: '0755'
+  content: |
+    #!/bin/bash
+    out=$(maas "$@")
+    ret=$?
+
+    if [ $ret -ne 0 ] || [ -z "$out" ] || ! echo "$out" | jq -e . >/dev/null 2>&1; then
+        echo "$out"
+        exit $ret
+    fi
+
+    target="$2"
+
+    # Helper function to align and draw OpenStack-style tables
+    prettify() {
+        python3 -c '
+    import sys
+    # 1. Read input and strip empty lines
+    raw_lines = [line.strip("\n").split("\t") for line in sys.stdin if line.strip("\n")]
+    
+    # 2. Handle completely empty results gracefully
+    if not raw_lines:
+        print("\n[ No records found. ]\n")
+        sys.exit(0)
+    
+    # 3. Remove the legacy dash separator from jq if it exists
+    if len(raw_lines) > 1 and all(cell.replace("-", "").strip() == "" for cell in raw_lines[1]):
+        raw_lines.pop(1)
+        
+    # 4. Catch empty strings and convert to "-" for a solid grid
+    lines = [["-" if cell == "" or cell == "null" else cell for cell in row] for row in raw_lines]
+        
+    # 5. Calculate optimal column widths
+    col_widths = [max(len(str(item)) for item in col) for col in zip(*lines)]
+    
+    def print_sep():
+        print("+" + "+".join("-" * (w + 2) for w in col_widths) + "+")
+        
+    print("")
+    print_sep()
+    # 6. Print headers CENTERED
+    print("| " + " | ".join(str(item).center(w) for item, w in zip(lines[0], col_widths)) + " |")
+    print_sep()
+    
+    # 7. Print data LEFT-ALIGNED
+    for row in lines[1:]:
+        row_ext = row + [""] * (len(col_widths) - len(row))
+        print("| " + " | ".join(str(item).ljust(w) for item, w in zip(row_ext, col_widths)) + " |")
+        
+    print_sep()
+    '
+    }
+
+    case "$target" in
+        machines|machine|nodes|node)
+            echo "$out" | jq -r '(["HOSTNAME", "STATUS", "POWER", "PWR TYPE", "IP ADDRESS", "SYSTEM ID"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.hostname, .status_name, .power_state, (.power_type // "-"), (.ip_addresses[0] // "-"), .system_id]) | @tsv' | prettify
+            ;;
+        block-devices|block-device)
+            echo "$out" | jq -r '(["ID", "NAME", "TYPE", "SIZE", "MODEL", "TAGS"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.id, .name, .type, .size, (.model // "-"), (.tags | join(",") // "-")]) | @tsv' | prettify
+            ;;
+        partitions|partition)
+            echo "$out" | jq -r '(["ID", "PATH", "SIZE", "FSTYPE", "UUID"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.id, .path, .size, (.fstype // "-"), (.uuid // "-")]) | @tsv' | prettify
+            ;;
+        interfaces|interface)
+            echo "$out" | jq -r '(["ID", "NAME", "TYPE", "MAC ADDRESS", "VLAN", "TAGS"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.id, .name, .type, (.mac_address // "-"), (.vlan.vid // "-"), (.tags | join(",") // "-")]) | @tsv' | prettify
+            ;;
+        tags|tag)
+            echo "$out" | jq -r '(["NAME", "COMMENT", "NODES"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.name, (.comment // "-"), (.node_count // "-")]) | @tsv' | prettify
+            ;;
+        boot-source-selections|boot-source-selection)
+            echo "$out" | jq -r '(["OS", "RELEASE", "ARCHES", "SUBARCHES", "LABELS"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.os, .release, (.arches | join(",")), (.subarches | join(",")), (.labels | join(","))]) | @tsv' | prettify
+            ;;
+        boot-resources|boot-resource)
+            echo "$out" | jq -r '(["NAME", "ARCHITECTURE", "TYPE", "SIZE"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.name, .architecture, .type, (.size // "-")]) | @tsv' | prettify
+            ;;
+        subnets|subnet)
+            echo "$out" | jq -r '(["NAME", "CIDR", "GATEWAY", "VLAN", "FABRIC"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.name, .cidr, (.gateway_ip // "-"), .vlan.vid, .vlan.fabric]) | @tsv' | prettify
+            ;;
+        fabrics|fabric)
+            echo "$out" | jq -r '(["ID", "NAME", "CLASS", "DESCRIPTION"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.id, .name, .class_type, (.description // "-")]) | @tsv' | prettify
+            ;;
+        vlans|vlan)
+            echo "$out" | jq -r '(["NAME", "VID", "FABRIC", "DHCP", "SPACE"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.name, .vid, .fabric, .dhcp_on, (.space // "-")]) | @tsv' | prettify
+            ;;
+        spaces|space)
+            echo "$out" | jq -r '(["ID", "NAME", "SUBNETS"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.id, .name, (.subnets | length)]) | @tsv' | prettify
+            ;;
+        ipranges|iprange)
+            echo "$out" | jq -r '(["TYPE", "START IP", "END IP", "COMMENT"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.type, .start_ip, .end_ip, (.comment // "-")]) | @tsv' | prettify
+            ;;
+        domains|domain)
+            echo "$out" | jq -r '(["NAME", "AUTHORITATIVE", "DEFAULT", "TTL"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.name, .authoritative, .is_default, (.ttl // "-")]) | @tsv' | prettify
+            ;;
+        rack-controllers|rack-controller)
+            echo "$out" | jq -r '(["HOSTNAME", "STATUS", "ZONE", "VERSION"] | (., map(length*"-"))), ((if type=="array" then . else [.] end)[] | [.hostname, .status_name, .zone.name, .version]) | @tsv' | prettify
+            ;;
+        *)
+            echo "$out" | python3 -c '
+    import sys, json
+    try:
+        data = json.load(sys.stdin)
+        if isinstance(data, dict): data = [data]
+        if not data or not isinstance(data, list):
+            print(json.dumps(data, indent=2))
+            sys.exit(0)
+            
+        ignored_suffixes = ("_uri", "_status_name", "_test_status", "_count")
+        
+        keys = []
+        for k, v in data[0].items():
+            if not isinstance(v, (str, int, bool, float)): continue
+            if any(k.endswith(s) for s in ignored_suffixes): continue
+            if k == "id": continue
+            keys.append(k)
+            
+        keys = keys[:6]
+        if not keys:
+            keys = [k for k, v in data[0].items() if isinstance(v, (str, int, bool, float))][:4]
+            
+        if not keys:
+            print(json.dumps(data, indent=2))
+            sys.exit(0)
+            
+        print("\t".join(k.upper().replace("_", " ") for k in keys))
+        print("\t".join("-" * len(k) for k in keys))
+        for item in data:
+            print("\t".join(str(item.get(k, "-")) for k in keys))
+    except Exception:
+        sys.exit(1)
+    ' | prettify || echo "$out" | jq -C .
+            ;;
+    esac
+
+- path: /etc/profile.d/default-editor.sh
+  permissions: '0644'
+  content: |
+    export EDITOR=nvim
+
+- path: /etc/sudoers.d/keep-editor
+  permissions: '0440'
+  content: |
+    Defaults env_keep += "EDITOR"
+
+{% if not nested_lxd and lxd_cert_b64 and lxd_key_b64 %}
+# Non-nested specific files (Host's LXD Certificates)
+- path: /root/snap/lxd/common/config/client.crt
+  owner: root:root
+  permissions: '0644'
+  encoding: b64
+  content: {{ lxd_cert_b64 }}
+
+- path: /root/snap/lxd/common/config/client.key
+  owner: root:root
+  permissions: '0600'
+  encoding: b64
+  content: {{ lxd_key_b64 }}
+{% endif %}
+
+# Kubernetes primary control plane node payload
+- path: /opt/k8s-primary.yaml
+  permissions: '0644'
+  content: |
+    #cloud-config
+    write_files:
+      - path: /etc/sysctl.d/k8s.conf
+        content: "net.bridge.bridge-nf-call-iptables=1\nnet.bridge.bridge-nf-call-ip6tables=1\nnet.ipv4.ip_forward=1\n"
+    bootcmd:
+      - mkdir -p -m 755 /etc/apt/keyrings
+      - curl -fsSL https://pkgs.k8s.io/core:/stable:/{{ k8s_version }}/deb/Release.key -o /etc/apt/keyrings/kubernetes-apt-keyring.asc
+      - echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc] https://pkgs.k8s.io/core:/stable:/{{ k8s_version }}/deb/ /' > /etc/apt/sources.list.d/kubernetes.list
+    packages: [ ca-certificates, curl, gpg, containerd, kubelet, kubeadm, kubectl ]
+    runcmd:
+      - echo "\n\n-------- Configuring Kubernetes prerequisites... --------\n"
+      - sysctl --system
+      # Disable swap
+      - swapoff -a
+      # Configure containerd
+      - mkdir -p /etc/containerd
+      - containerd config default > /etc/containerd/config.toml
+      # Enable systemd as the cgroup driver for containerd (same as Kubernetes)
+      - sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+      - systemctl restart containerd
+      - systemctl enable containerd
+      - apt-mark hold kubelet kubeadm kubectl
+      - echo "\n\n-------- Bootstrapping primary control plane... --------\n"
+      - kubeadm init --pod-network-cidr=192.168.0.0/16 --control-plane-endpoint ENDPOINT:6443 --upload-certs
+      # Setup kubectl for root
+      - mkdir -p /root/.kube
+      - cp -i /etc/kubernetes/admin.conf /root/.kube/config
+      # Setup kubectl for the default ubuntu user
+      - mkdir -p /home/ubuntu/.kube
+      - cp -i /etc/kubernetes/admin.conf /home/ubuntu/.kube/config
+      - chown -R ubuntu:ubuntu /home/ubuntu/.kube
+      - KUBECONFIG=/etc/kubernetes/admin.conf kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.27.3/manifests/calico.yaml
+
+# Kubernetes secondary control plane node payload
+- path: /opt/k8s-secondary.yaml
+  permissions: '0644'
+  content: |
+    #cloud-config
+    write_files:
+      - path: /etc/sysctl.d/k8s.conf
+        content: "net.bridge.bridge-nf-call-iptables=1\nnet.bridge.bridge-nf-call-ip6tables=1\nnet.ipv4.ip_forward=1\n"
+    bootcmd:
+      - mkdir -p -m 755 /etc/apt/keyrings
+      - curl -fsSL https://pkgs.k8s.io/core:/stable:/{{ k8s_version }}/deb/Release.key -o /etc/apt/keyrings/kubernetes-apt-keyring.asc
+      - echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc] https://pkgs.k8s.io/core:/stable:/{{ k8s_version }}/deb/ /' > /etc/apt/sources.list.d/kubernetes.list
+    packages: [ ca-certificates, curl, gpg, containerd, kubelet, kubeadm, kubectl ]
+    runcmd:
+      - echo "\n\n-------- Configuring Kubernetes prerequisites... --------\n"
+      - sysctl --system
+      # Disable swap
+      - swapoff -a
+      # Configure containerd
+      - mkdir -p /etc/containerd
+      - containerd config default > /etc/containerd/config.toml
+      # Enable systemd as the cgroup driver for containerd (same as Kubernetes)
+      - sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+      - systemctl restart containerd
+      - systemctl enable containerd
+      - apt-mark hold kubelet kubeadm kubectl
+      - echo "\n\n-------- Joining the HA cluster... --------\n"
+      - JOIN_COMMAND
+      # Setup kubectl for the default ubuntu user
+      - mkdir -p /home/ubuntu/.kube
+      - cp -i /etc/kubernetes/admin.conf /home/ubuntu/.kube/config
+      - chown -R ubuntu:ubuntu /home/ubuntu/.kube
+
+# Kubernetes worker node payload
+- path: /opt/k8s-worker.yaml
+  permissions: '0644'
+  content: |
+    #cloud-config
+    write_files:
+      - path: /etc/sysctl.d/k8s.conf
+        content: "net.bridge.bridge-nf-call-iptables=1\nnet.bridge.bridge-nf-call-ip6tables=1\nnet.ipv4.ip_forward=1\n"
+    bootcmd:
+      - mkdir -p -m 755 /etc/apt/keyrings
+      - curl -fsSL https://pkgs.k8s.io/core:/stable:/{{ k8s_version }}/deb/Release.key -o /etc/apt/keyrings/kubernetes-apt-keyring.asc
+      - echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc] https://pkgs.k8s.io/core:/stable:/{{ k8s_version }}/deb/ /' > /etc/apt/sources.list.d/kubernetes.list
+    packages: [ ca-certificates, curl, gpg, containerd, kubelet, kubeadm ]
+    runcmd:
+      - echo "\n\n-------- Configuring Kubernetes prerequisites... --------\n"
+      - sysctl --system
+      # Disable swap
+      - swapoff -a
+      # Configure containerd
+      - mkdir -p /etc/containerd
+      - containerd config default > /etc/containerd/config.toml
+      # Enable systemd as the cgroup driver for containerd
+      - sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+      - systemctl restart containerd
+      - systemctl enable containerd
+      - apt-mark hold kubelet kubeadm
+      - echo "\n\n-------- Joining the HA cluster... --------\n"
+      - JOIN_COMMAND
+
+bootcmd:
+  - mkdir -p -m 755 /etc/apt/keyrings
+  - curl -fsSL https://pkgs.k8s.io/core:/stable:/{{ k8s_version }}/deb/Release.key -o /etc/apt/keyrings/kubernetes-apt-keyring.asc
+  - echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc] https://pkgs.k8s.io/core:/stable:/{{ k8s_version }}/deb/ /' > /etc/apt/sources.list.d/kubernetes.list
+
+packages:
+  - git
+  - neovim
+  - pollinate
+  - jq
+  - kubectl
+
+{% if not maas_snap %}
+apt:
+  sources:
+    maas:
+      source: 'ppa:maas/{{ maas_channel.split('/')[0] }}'
+{% endif %}
+
+snap:
+  commands:
+  - snap install lxd --channel={{ lxd_channel }}
+{% if maas_snap %}
+  - snap install maas --channel={{ maas_channel }}
+{% endif %}
+
+package_update: true
+package_upgrade: true
+package_reboot_if_required: true
+
+timezone: {{ timezone }}
+
+random_seed:
+  command: [pollinate]
+  command_required: true
+  file: /dev/urandom
+
+runcmd:
+
+{% if not maas_snap %}
+
+# Install MAAS (not using apt module or else bind conflicts with LXD)
+- echo "\n\n-------- Installing deb MAAS... --------\n"
+
+- apt-get update
+- apt-get install -y maas
+
+{% endif %}
+
+# Verify critical dependencies
+- echo "\n\n-------- Verifying dependencies... --------\n"
+- |
+  for cmd in lxc jq maas; do
+    if ! command -v $cmd >/dev/null 2>&1; then
+      echo "CRITICAL ERROR: Required command '$cmd' not found."
+      echo "Snap/apt package installation likely failed due to a network error."
+      exit 1
+    fi
+  done
+  echo "All dependencies verified successfully!"
+
+# Export variables
+- echo "\n\n-------- Exporting variables... --------\n"
+
+# --- Networking ---
+- export IP_ADDRESS=$(hostname -I | awk '{print $1}')
+- export INTERFACE=$(ip -j route show default | jq -r '.[].dev')
+
+# --- Auth & System ---
+- export SSH_KEY="{{ ssh_import_id }}"
+- export ADMIN_USER="{{ maas_user }}"
+- export ADMIN_PASS="{{ maas_password }}"
+- export ADMIN_EMAIL="{{ maas_email }}"
+- export RUN_AS="sudo -u {{ sys_user }}"
+- export RUN_AS_LOGIN="sudo -i -u {{ sys_user }}"
+
+# --- LXD Settings ---
+- export LXD_PROJECT="{{ lxd_project }}"
+- export LXD_POOL="{{ lxd_pool }}"
+{% if nested_lxd %}
+- export LXD_ADDR="${IP_ADDRESS}:8444"
+- export LXD_CERT="/root/lxd-local.crt"
+- export LXD_KEY="/root/lxd-local.key"
+{% else %}
+- export LXD_ADDR="{{ maas_gateway }}:8443"
+- export LXD_CERT="/root/snap/lxd/common/config/client.crt"
+- export LXD_KEY="/root/snap/lxd/common/config/client.key"
+{% endif %}
+
+# --- MAAS Settings ---
+- export MAAS_DB_NAME="{{ maas_db_name }}"
+- export MAAS_DOMAIN_NAME="{{ tld if tld else 'maas' }}"
+- export MAAS_DNS="{{ maas_dns }}"
+- export MAAS_IMAGES="{{ maas_images }}"
+- export MAAS_CIDR="{{ maas_cidr }}"
+- export MAAS_RESERVED_IP_COUNT="{{ maas_ip_count }}"
+
+# --- Hardware Allocation ---
+- export CONTROL_HA="{{ control_ha }}"
+- export WORKER_HA="{{ worker_ha }}"
+- export MAX_HA="{{ max_ha }}"
+
+- export NODES_HOSTNAMES="{{ nodes_hostnames }}"
+- export NODES_CPUS="{{ nodes_cpus }}"
+- export NODES_RAMS="{{ nodes_rams }}"
+- export NODES_DISKS="{{ nodes_disks }}"
+
+# Dynamic IP Subnet Slicing
+- echo "\n\n-------- Calculating Payload IP Allocations --------\n"
+- |
+  eval $(python3 -c "
+  import ipaddress, sys
+  try:
+      net = ipaddress.IPv4Network('{{ maas_cidr }}', strict=False)
+      hosts = list(net.hosts())
+      
+      dhcp_count = int('{{ maas_ip_count }}')
+      
+      # Ensure the subnet is large enough to hold the requested IPs + Gateway + Static
+      total_needed = dhcp_count + 5 
+      if len(hosts) < total_needed:
+          print(f'echo \"CRITICAL: Subnet {net} is too small to fit the requested IP ranges!\"; exit 1')
+          sys.exit()
+      
+      maas_gw = hosts[0]
+      
+      # Top-Down Allocation Logic
+      maas_e = hosts[-1]
+      maas_s = hosts[-dhcp_count]
+      
+      print(f'export MAAS_GATEWAY={maas_gw}')
+      print(f'export MAAS_RESERVED_IP_START={maas_s}')
+      print(f'export MAAS_RESERVED_IP_END={maas_e}')
+  except Exception as e:
+      print(f'echo \"IP Math Error: {e}\"; exit 1')
+  ")
+
+- echo "Network CIDR      - $MAAS_CIDR"
+- echo "Gateway IP        - $MAAS_GATEWAY"
+- echo "Reserved IP Count - $MAAS_RESERVED_IP_COUNT"
+- echo "Reserved IP Start - $MAAS_RESERVED_IP_START"
+- echo "Reserved IP End   - $MAAS_RESERVED_IP_END"
+
+{% if maas_snap %}
+
+# Install PostgreSQL
+- echo "\n\n-------- Install PostgreSQL... --------\n"
+
+- systemctl disable --now systemd-timesyncd
+- apt-get update
+- apt-get install -y postgresql
+
+# Configure PostgreSQL
+- echo "\n\n-------- Configure PostgreSQL... --------\n"
+
+- sudo -i -u postgres psql -c "CREATE USER \"$ADMIN_USER\" WITH ENCRYPTED PASSWORD '$ADMIN_PASS'"
+- sudo -i -u postgres createdb -O "$ADMIN_USER" "$MAAS_DB_NAME"
+- sed -i "1i host    $MAAS_DB_NAME    $ADMIN_USER    0/0     md5" /etc/postgresql/*/main/pg_hba.conf
+
+# Initialise snap MAAS
+- echo "\n\n-------- Initializing snap MAAS... --------\n"
+
+- maas init region+rack --database-uri "postgres://$ADMIN_USER:$ADMIN_PASS@$HOSTNAME/$MAAS_DB_NAME" --maas-url http://${IP_ADDRESS}:5240/MAAS
+- maas createadmin --username $ADMIN_USER --password $ADMIN_PASS --email $ADMIN_EMAIL {% if ssh_import_id %}--ssh-import $SSH_KEY{% endif %}
+
+{% else %}
+
+# Initialise deb MAAS
+- echo "\n\n-------- Initializing deb MAAS... --------\n"
+
+- maas init --admin-username $ADMIN_USER --admin-password $ADMIN_PASS --admin-email $ADMIN_EMAIL {% if ssh_import_id %}--admin-ssh-import $SSH_KEY{% endif %} --rbac-url "" --candid-agent-file ""
+
+{% endif %}
+
+# Wait for MAAS services to be ready
+- |
+  echo "\n\n-------- Waiting for MAAS API to be ready... --------\n"
+  
+  sleep 30
+  until maas login $ADMIN_USER 'http://localhost:5240/MAAS/' $(maas apikey --username $ADMIN_USER) > /dev/null 2>&1; do
+    echo "MAAS is not ready yet (502). Retrying in 30 seconds..."
+    sleep 30
+  done
+
+# Grab API key and login as admin
+- echo "\n\n-------- Logging in as '$ADMIN_USER' user... --------\n"
+
+- export APIKEY=$(maas apikey --username $ADMIN_USER)
+- maas login $ADMIN_USER 'http://localhost:5240/MAAS/' $APIKEY
+
+- maas $ADMIN_USER maas set-config name=maas_name value=$LXD_PROJECT name=completed_intro value=true
+
+# Automatically create and add ssh keys to MAAS
+- echo "\n\n-------- Generating SSH keys and adding them to MAAS... --------\n"
+
+- ssh-keygen -q -t rsa -N "" -f "/home/{{ sys_user }}/.ssh/id_rsa"
+- chown {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/.ssh/id_rsa /home/{{ sys_user }}/.ssh/id_rsa.pub
+- chmod 600 /home/{{ sys_user }}/.ssh/id_rsa
+- chmod 644 /home/{{ sys_user }}/.ssh/id_rsa.pub
+- maas $ADMIN_USER sshkeys create key="$(cat /home/{{ sys_user }}/.ssh/id_rsa.pub)"
+
+# Configure MAAS networking (set gateways, vlans, DHCP on etc)
+- echo "\n\n-------- Configuring MAAS networking... --------\n"
+
+- export FABRIC_ID=$(maas $ADMIN_USER subnet read "$MAAS_CIDR" | jq -r ".vlan.fabric_id")
+- export VLAN_TAG=$(maas $ADMIN_USER subnet read "$MAAS_CIDR" | jq -r ".vlan.vid")
+- export PRIMARY_RACK=$(maas $ADMIN_USER rack-controllers read | jq -r ".[] | .system_id")
+
+- maast $ADMIN_USER subnet update $MAAS_CIDR gateway_ip=$MAAS_GATEWAY
+- maast $ADMIN_USER ipranges create type=dynamic start_ip=$MAAS_RESERVED_IP_START end_ip=$MAAS_RESERVED_IP_END
+- maast $ADMIN_USER vlan update $FABRIC_ID $VLAN_TAG dhcp_on=true primary_rack=$PRIMARY_RACK
+- maast $ADMIN_USER maas set-config name=upstream_dns value=$MAAS_DNS
+
+# Set the MAAS domain name
+- |
+  echo "\n\n-------- Configuring MAAS domain '$MAAS_DOMAIN_NAME'... --------\n"
+  
+  # Check if MAAS auto-created the domain during initialization
+  EXISTING_DOMAIN_ID=$(maas $ADMIN_USER domains read | jq -r '.[] | select(.name=="'$MAAS_DOMAIN_NAME'") | .id')
+  
+  if [ -n "$EXISTING_DOMAIN_ID" ] && [ "$EXISTING_DOMAIN_ID" != "null" ]; then
+    echo "Domain '$MAAS_DOMAIN_NAME' already exists! Setting as default and authoritative..."
+    export MAAS_DOMAIN_NAME_ID=$EXISTING_DOMAIN_ID
+    maast $ADMIN_USER domain update $MAAS_DOMAIN_NAME_ID authoritative=true
+    maast $ADMIN_USER domain set-default $MAAS_DOMAIN_NAME_ID
+  else
+    echo "Domain not found. Renaming default domain to '$MAAS_DOMAIN_NAME'..."
+    export MAAS_DOMAIN_NAME_ID=$(maas $ADMIN_USER domains read | jq -r '.[] | select(.is_default==true) | .id')
+    maast $ADMIN_USER domain update $MAAS_DOMAIN_NAME_ID name=$MAAS_DOMAIN_NAME authoritative=true
+  fi
+  
+  # Update the rack controller to use the correct domain
+  maast $ADMIN_USER rack-controller update $PRIMARY_RACK domain=$MAAS_DOMAIN_NAME
+
+# Add MAAS DNS to host
+- |
+  cat <<EOF > /etc/netplan/99-maas-dns.yaml
+  network:
+    version: 2
+    ethernets:
+      $INTERFACE:
+        nameservers:
+          addresses: [$IP_ADDRESS]
+          search: [$MAAS_DOMAIN_NAME, maas]
+  EOF
+
+- chmod 600 /etc/netplan/99-maas-dns.yaml
+- netplan apply
+
+# Configure boot images
+- echo "\n\n-------- Configuring MAAS boot images... --------\n"
+
+- export BOOT_SOURCE_ID=$(maas $ADMIN_USER boot-sources read | jq -r '.[0].id')
+- |
+  for RELEASE in $MAAS_IMAGES; do
+    maast $ADMIN_USER boot-source-selections create $BOOT_SOURCE_ID os="ubuntu" release="$RELEASE" arches="amd64" labels='*' subarches='*'
+  done
+- maas $ADMIN_USER boot-resources import
+
+# Wait for MAAS boot images to be ready
+- |
+  echo "\n\n-------- Waiting for all MAAS boot images to sync... --------\n"
+  
+  while true; do
+    missing_images=false
+    
+    importing_status=$(maas $ADMIN_USER boot-resources is-importing)
+    requested_releases=$(maas $ADMIN_USER boot-source-selections read $BOOT_SOURCE_ID | jq -r '.[].release')
+    downloaded_releases=$(maas $ADMIN_USER boot-resources read | jq -r '.[].name' | sort | uniq)
+    
+    # Check if the image has been downloaded
+    for release in $requested_releases; do
+      if echo "$downloaded_releases" | grep -q "$release"; then
+         # Image exists. Now check if import is finished
+         if [ "$importing_status" = "false" ]; then
+             echo "  Image '$release' has downloaded!"
+         else
+             echo "  Image '$release' is currently syncing..."
+             missing_images=true
+         fi
+      else
+         echo "  Image '$release' was not found in boot resources..."
+         missing_images=true
+      fi
+    done
+    
+    # Check for missing images
+    if [ "$missing_images" = "false" ]; then
+      clean_list=$(echo "$requested_releases" | tr '\n' ' ')
+      echo "All selected boot images ( $clean_list) are fully synced!"
+      maast $ADMIN_USER boot-resources read
+      break
+    fi
+    
+    echo "Some images are missing. Waiting 30s..."
+    sleep 30
+  done
+
+{% if nested_lxd %}
+
+# Generate local LXD trust certificate
+- echo "\n\n-------- Generating trust certificate for local LXD... --------\n"
+
+- openssl req -x509 -newkey rsa:2048 -keyout $LXD_KEY -out $LXD_CERT -nodes -days 3650 -subj "/CN=lxd-local"
+- lxc config trust add $LXD_CERT --name lxd-local
+
+# Provide certs to user context
+- $RUN_AS mkdir -p /home/{{ sys_user }}/snap/lxd/common/config
+- cp $LXD_CERT /home/{{ sys_user }}/snap/lxd/common/config/client.crt
+- cp $LXD_KEY /home/{{ sys_user }}/snap/lxd/common/config/client.key
+- chown -R {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/snap/lxd/common/config
+
+{% else %}
+
+# Setup external LXD client certificates and remote connection
+- echo "\n\n-------- Configuring remote LXD connection... --------\n"
+
+- lxc remote add host-lxd https://$LXD_ADDR --accept-certificate
+- lxc remote switch host-lxd
+
+# Provide certs to user context
+- $RUN_AS mkdir -p /home/{{ sys_user }}/snap/lxd/common/config
+- cp $LXD_CERT /home/{{ sys_user }}/snap/lxd/common/config/client.crt
+- cp $LXD_KEY /home/{{ sys_user }}/snap/lxd/common/config/client.key
+- chown -R {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/snap/lxd/common/config
+- $RUN_AS lxc remote add host-lxd https://$LXD_ADDR --accept-certificate
+
+{% endif %}
+
+
+{% if lxd_project != "default" %}
+
+# Switch to LXD MAAS project
+- echo "\n\n-------- Switching to LXD '$LXD_PROJECT' project... --------\n"
+
+- lxc project switch $LXD_PROJECT
+
+{% endif %}
+
+# Create VMs directly via LXD
+- echo "\n\n-------- Creating empty VMs in LXD... --------\n"
+- |
+  i=1
+  for HOST in $NODES_HOSTNAMES; do
+    CPU=$(echo "$NODES_CPUS" | cut -d' ' -f$i)
+    RAM=$(echo "$NODES_RAMS" | cut -d' ' -f$i)
+    DISK=$(echo "$NODES_DISKS" | cut -d' ' -f$i)
+    
+    lxc init "$HOST" --vm --empty -c limits.cpu="$CPU" -c limits.memory="$RAM" -d root,size="$DISK"
+    
+    i=$((i + 1))
+  done
+
+# Start VMs to trigger PXE Boot & Enlistment
+- echo "\n\n-------- Starting VMs for MAAS enlistment... --------\n"
+- |
+  for HOST in $NODES_HOSTNAMES; do
+    lxc start $HOST
+  done
+
+# Wait for VMs to enlist in MAAS via MAC
+- |
+  echo "\n\n-------- Waiting for all VMs to enlist in MAAS... --------\n"
+  
+  while true; do
+    all_enlisted=true
+    
+    for HOST in $NODES_HOSTNAMES; do
+      # Fetch the dynamic MAC to identify the machine in MAAS
+      MAC=$(lxc config get $HOST volatile.eth0.hwaddr)
+      SYSTEM_ID=$(maas $ADMIN_USER machines read mac_address=$MAC | jq -r '.[0].system_id')
+      status=$(maas $ADMIN_USER machines read mac_address=$MAC | jq -r '.[0].status_name')
+      
+      if [ "$SYSTEM_ID" != "null" ] && [ "$status" = "New" ]; then
+        echo "  [OK] '$HOST' was enlisted with ID '$SYSTEM_ID'!"
+      else
+        if [ "$status" = "null" ]; then
+           status="Waiting for PXE"
+        fi
+        echo "  [..] '$HOST' ($MAC) is currently '$status'..."
+        all_enlisted=false
+      fi
+    done
+    
+    # If the flag is still true, everyone is enlisted -> break the loop
+    if [ "$all_enlisted" = true ]; then
+      echo "All VMs have successfully enlisted!\n"
+      lxc list
+      sleep 10
+      break
+    fi
+    
+    echo "Waiting 30s before next check..."
+    sleep 30
+  done
+
+# Create Availability Zones in MAAS
+- |
+  echo "\n\n-------- Creating Availability Zones... --------\n"
+  for i in $(seq 1 $MAX_HA); do
+    ZONE="AZ$i"
+    if ! maas $ADMIN_USER zones read | jq -e ".[] | select(.name==\"$ZONE\")" > /dev/null; then
+      echo "Creating zone: $ZONE"
+      maast $ADMIN_USER zones create name="$ZONE" description="Auto-generated AZ for HA Node $i"
+    else
+      echo "Zone $ZONE already exists."
+    fi
+  done
+  
+  echo "Assigning Primary MAAS Controller to AZ1..."
+  maast $ADMIN_USER rack-controller update "$PRIMARY_RACK" zone="AZ1"
+
+# Find machines by MAC and set hostnames, domain, and explicit LXD power controls
+- |
+  echo "\n\n-------- Configuring hostnames and power controls... --------\n"
+  
+  LXD_CERT_CONTENT=$(cat $LXD_CERT)
+  LXD_KEY_CONTENT=$(cat $LXD_KEY)
+  
+  for HOST in $NODES_HOSTNAMES; do
+    MAC=$(lxc config get $HOST volatile.eth0.hwaddr)
+    SYSTEM_ID=$(maas $ADMIN_USER machines read mac_address=$MAC | jq -r '.[0].system_id')
+    
+    NODE_NUM=$(echo "$HOST" | awk -F'-' '{print $NF}')
+    TARGET_ZONE="AZ${NODE_NUM}"
+    
+    # Force the MAAS hostname, domain, and explicit LXD power controls
+    maast $ADMIN_USER machine update $SYSTEM_ID \
+      hostname=$HOST \
+      domain=$MAAS_DOMAIN_NAME_ID \
+      zone=$TARGET_ZONE \
+      power_type="lxd" \
+      power_parameters_power_address="https://$LXD_ADDR" \
+      power_parameters_certificate="$LXD_CERT_CONTENT" \
+      power_parameters_key="$LXD_KEY_CONTENT" \
+      power_parameters_instance_name="$HOST" \
+      power_parameters_project="$LXD_PROJECT"
+  done
+
+# Commission machines
+- echo "\n\n-------- Commissioning machines... --------\n"
+- |
+  for HOST in $NODES_HOSTNAMES; do
+    SYSTEM_ID=$(maas $ADMIN_USER machines read hostname=$HOST | jq -r '.[0].system_id')
+    maast $ADMIN_USER machine commission $SYSTEM_ID
+  done
+
+# Wait for VMs to be ready
+- |
+  echo "\n\n-------- Waiting for VMs to enter 'Ready' state... --------\n"
+  
+  while true; do
+    all_ready=true
+    
+    for HOST in $NODES_HOSTNAMES; do
+      # Query MAAS for the status
+      status=$(maas $ADMIN_USER machines read hostname=$HOST | jq -r '.[0].status_name')
+      
+      if [ "$status" = "Ready" ]; then
+        echo "  [OK] '$HOST' is '$status'!"
+      else
+        echo "  [..] '$HOST' is currently '$status'..."
+        all_ready=false
+      fi
+    done
+    
+    # If the flag is still true, everyone is ready -> break the loop
+    if [ "$all_ready" = true ]; then
+      echo "All VMs are Ready!"
+      maast $ADMIN_USER machines read
+      netplan apply # Update MAAS DNS record
+      sleep 10
+      break
+    fi
+    
+    echo "Waiting 60s before checking again..."
+    sleep 60
+  done
+
+# Create tags and add them to commissioned machines
+- echo "\n\n-------- Creating and adding tags... --------\n"
+- |
+  maast $ADMIN_USER tags create name=kubernetes
+  maast $ADMIN_USER tags create name=control-plane
+  maast $ADMIN_USER tags create name=worker-node
+
+  for HOST in $NODES_HOSTNAMES; do
+    SYSTEM_ID=$(maas $ADMIN_USER machines read hostname=$HOST | jq -r '.[0].system_id')
+
+    # Tag main disks as SSDs
+    echo "\n\n-------- Tagging main disks as SSDs for '$HOST'... --------\n"
+    
+    MAIN_BLOCK_ID=$(maas $ADMIN_USER block-devices read $SYSTEM_ID | jq -r '.[] | select(.serial == "lxd_root" or .name == "sda" or .name == "vda") | .id' | head -n 1)
+    if [ -n "$MAIN_BLOCK_ID" ] && [ "$MAIN_BLOCK_ID" != "null" ]; then
+      maast $ADMIN_USER block-device add-tag $SYSTEM_ID $MAIN_BLOCK_ID tag=ssd
+      maast $ADMIN_USER block-device remove-tag $SYSTEM_ID $MAIN_BLOCK_ID tag=rotary
+      maast $ADMIN_USER block-device remove-tag $SYSTEM_ID $MAIN_BLOCK_ID tag=1rpm
+    fi
+    
+    echo "\n\n-------- Tagging '$HOST'... --------\n"
+    
+    # Base tag for all nodes
+    maast $ADMIN_USER tag update-nodes kubernetes add=$SYSTEM_ID
+    
+    case "$HOST" in
+      control-plane-*)
+        maast $ADMIN_USER tag update-nodes control-plane add=$SYSTEM_ID
+        ;;
+        
+      worker-node-*)
+        maast $ADMIN_USER tag update-nodes worker-node add=$SYSTEM_ID
+        ;;
+    esac
+  done
+
+
+# ====================================WIP===========================================
+
+
+# Dynamically select the first node as the primary control plane
+- export PRIMARY_NODE=$(echo "$NODES_HOSTNAMES" | awk '{print $1}')
+- export PRIMARY_FQDN="${PRIMARY_NODE}.${MAAS_DOMAIN_NAME}"
+
+# Inject the DNS endpoint into the primary payload
+- sed -i "s/ENDPOINT/$PRIMARY_FQDN/g" /opt/k8s-primary.yaml
+- export USER_DATA_PRIMARY=$(cat /opt/k8s-primary.yaml | base64 -w 0)
+
+# Deploy Primary Control Plane first
+- echo "\n\n-------- Deploying Primary Control Plane '$PRIMARY_NODE'... --------\n"
+
+- SYSTEM_ID_1=$(maas $ADMIN_USER machines read hostname=$PRIMARY_NODE | jq -r '.[0].system_id')
+- maast $ADMIN_USER machine deploy $SYSTEM_ID_1 user_data=$USER_DATA_PRIMARY
+
+# Wait for Primary Control Plane to enter the 'Deployed' state in MAAS
+- echo "Waiting for MAAS to mark '$PRIMARY_NODE' as Deployed..."
+- |
+  while true; do
+    status=$(maas $ADMIN_USER machines read hostname=$PRIMARY_NODE | jq -r '.[0].status_name')
+    
+    if [ "$status" = "Deployed" ]; then
+      echo "  [OK] '$PRIMARY_NODE' is '$status'!"
+      break
+    else
+      echo "  [..] '$PRIMARY_NODE' is currently '$status'..."
+      
+      if [ "$status" = "Failed deployment" ]; then 
+        echo "Deployment failed for $PRIMARY_NODE!"
+        exit 1
+      fi
+    fi
+    
+    echo "Waiting 60s before checking again..."
+    sleep 60
+  done
+
+- PRIMARY_IP=$(maas $ADMIN_USER machines read hostname=$PRIMARY_NODE | jq -r '.[0].ip_addresses[0]')
+
+# Wait for SSH to become available on Primary Control Plane
+- echo "\n\n-------- Waiting for SSH on Primary Control Plane '$PRIMARY_NODE' to become available... --------\n"
+- |
+  until $RUN_AS ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -q -i /home/{{ sys_user }}/.ssh/id_rsa ubuntu@$PRIMARY_IP exit; do
+    sleep 10
+  done
+
+# Stream the cloud-init execution of Primary Control Plane
+- echo "\n\n-------- Tail '$PRIMARY_NODE' cloud-init logs... --------\n"
+- |
+  $RUN_AS ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /home/{{ sys_user }}/.ssh/id_rsa ubuntu@$PRIMARY_IP "sudo sh -c '
+    until [ -f /var/log/cloud-init-output.log ]; do sleep 2; done
+    
+    # 1. Start tailing the log in the background
+    tail -f /var/log/cloud-init-output.log &
+    TAIL_PID=\$!
+    
+    # 2. Block until cloud-init is completely finished
+    cloud-init status --wait >/dev/null 2>&1
+    
+    # 3. Give tail 2 seconds to flush the final log lines to stdout
+    sleep 2
+    
+    # 4. Cleanly kill the background tail, closing the SSH connection
+    kill \$TAIL_PID 2>/dev/null || true
+  '" | sed 's/finished at/completed at/g'
+
+# Verify cluster success before proceeding
+- |
+  if ! $RUN_AS ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /home/{{ sys_user }}/.ssh/id_rsa ubuntu@$PRIMARY_IP "sudo test -f /etc/kubernetes/admin.conf"; then
+    echo "CRITICAL ERROR: kubeadm init failed on $PRIMARY_NODE! Halting cluster rollout."
+    exit 1
+  fi
+
+- echo "\n-------- '$PRIMARY_NODE' successfully initialized! --------\n"
+
+# Extract the Join Command and Certificate Key securely over SSH
+- echo "\n\n-------- Extracting Join Tokens from $PRIMARY_NODE... --------\n"
+
+- export JOIN_CMD=$($RUN_AS ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /home/{{ sys_user }}/.ssh/id_rsa ubuntu@$PRIMARY_IP "sudo kubeadm token create --print-join-command")
+- export CERT_KEY=$($RUN_AS ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /home/{{ sys_user }}/.ssh/id_rsa ubuntu@$PRIMARY_IP "sudo kubeadm init phase upload-certs --upload-certs | tail -1")
+
+# Format the full join command and cleanly inject it into the payload via sed
+- export SECONDARY_JOIN="$JOIN_CMD --control-plane --certificate-key $CERT_KEY"
+- sed -i "s|JOIN_COMMAND|$SECONDARY_JOIN|g" /opt/k8s-secondary.yaml
+- export USER_DATA_SECONDARY=$(cat /opt/k8s-secondary.yaml | base64 -w 0)
+
+- sed -i "s|JOIN_COMMAND|$JOIN_CMD|g" /opt/k8s-worker.yaml
+- export USER_DATA_WORKER=$(cat /opt/k8s-worker.yaml | base64 -w 0)
+
+# Fetch Kubeconfig to the MAAS Controller so you can use kubectl locally
+- echo "\n\n-------- Fetching Kubeconfig to MAAS Controller... --------\n"
+
+# Setup kubectl for root directly from the SSH stream
+- mkdir -p /root/.kube
+- $RUN_AS ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /home/{{ sys_user }}/.ssh/id_rsa ubuntu@$PRIMARY_IP "sudo cat /etc/kubernetes/admin.conf" > /root/.kube/config
+- chmod 600 /root/.kube/config
+
+# Copy the config to the standard user
+- mkdir -p /home/{{ sys_user }}/.kube
+- cp /root/.kube/config /home/{{ sys_user }}/.kube/config
+- chown -R {{ sys_user }}:{{ sys_user }} /home/{{ sys_user }}/.kube
+
+# Check Networking
+- echo "\n\n-------- Checking Calico Networking... --------\n"
+
+- kubectl get pods --all-namespaces
+- sleep 10
+
+# Loop through and deploy the rest of the HA cluster sequentially
+- echo "\n\n-------- Deploying Cluster Nodes... --------\n"
+- |
+  for HOST in $NODES_HOSTNAMES; do
+    # Skip the primary node since it is already deployed
+    if [ "$HOST" = "$PRIMARY_NODE" ]; then continue; fi
+    
+    # Determine the node role and corresponding payload
+    case "$HOST" in
+      control-plane*)
+        TARGET_USER_DATA=$USER_DATA_SECONDARY
+        NODE_ROLE="Secondary Control Plane"
+        ;;
+      worker-node*)
+        TARGET_USER_DATA=$USER_DATA_WORKER
+        NODE_ROLE="Worker Node"
+        ;;
+      *)
+        echo "Unknown node prefix for $HOST, skipping..."
+        continue
+        ;;
+    esac
+    
+    echo "\n\n-------- Deploying $NODE_ROLE '$HOST'... --------\n"
+    
+    SYSTEM_ID=$(maas $ADMIN_USER machines read hostname=$HOST | jq -r '.[0].system_id')
+    maast $ADMIN_USER machine deploy $SYSTEM_ID user_data=$TARGET_USER_DATA
+
+    # Wait for the node to enter the 'Deployed' state in MAAS
+    echo "Waiting for MAAS to mark '$HOST' as Deployed..."
+    while true; do
+      status=$(maas $ADMIN_USER machines read hostname=$HOST | jq -r '.[0].status_name')
+      
+      if [ "$status" = "Deployed" ]; then
+        echo "  [OK] '$HOST' is '$status'!"
+        break
+      else
+        echo "  [..] '$HOST' is currently '$status'..."
+        
+        if [ "$status" = "Failed deployment" ]; then
+          echo "Deployment failed for $HOST!"
+          exit 1
+        fi
+      fi
+      
+      echo "Waiting 60s before checking again..."
+      sleep 60
+    done
+    
+    # Fetch the newly deployed node's IP
+    NODE_IP=$(maas $ADMIN_USER machines read hostname=$HOST | jq -r '.[0].ip_addresses[0]')
+    
+    # Wait for SSH to become available
+    echo "\n\n-------- Waiting for SSH on $NODE_ROLE '$HOST'... --------\n"
+    until $RUN_AS ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -q -i /home/{{ sys_user }}/.ssh/id_rsa ubuntu@$NODE_IP exit; do
+      sleep 10
+    done
+    
+    # Stream the cloud-init execution of the secondary node
+    echo "\n\n-------- Tail '$HOST' cloud-init logs... --------\n"
+    $RUN_AS ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /home/{{ sys_user }}/.ssh/id_rsa ubuntu@$NODE_IP "sudo sh -c '
+      until [ -f /var/log/cloud-init-output.log ]; do sleep 2; done
+      
+      # 1. Start tailing the log in the background
+      tail -f /var/log/cloud-init-output.log &
+      TAIL_PID=\$!
+      
+      # 2. Block until cloud-init is completely finished
+      cloud-init status --wait >/dev/null 2>&1
+      
+      # 3. Give tail 2 seconds to flush the final log lines to stdout
+      sleep 2
+      
+      # 4. Cleanly kill the background tail, closing the SSH connection
+      kill \$TAIL_PID 2>/dev/null || true
+    '" | sed 's/finished at/completed at/g'
+    
+    echo "\n-------- '$HOST' successfully joined the cluster! --------\n"
+    kubectl get nodes
+  done
+
+- kubectl get pods --all-namespaces
+- kubectl get nodes
+- sleep 10
+
+# ====================================WIP===========================================
+
+- echo "\n\n-------- Finished deploying Kubernetes using kubeadm, have fun!... --------\n"
+
