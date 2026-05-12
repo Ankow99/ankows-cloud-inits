@@ -1077,10 +1077,6 @@ runcmd:
     esac
   done
 
-
-# ====================================WIP===========================================
-
-
 # Dynamically select the first node as the primary control plane
 - export PRIMARY_NODE=$(echo "$NODES_HOSTNAMES" | awk '{print $1}')
 - export PRIMARY_FQDN="${PRIMARY_NODE}.${MAAS_DOMAIN_NAME}"
@@ -1176,6 +1172,7 @@ runcmd:
 - mkdir -p /root/.kube
 - $RUN_AS ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /home/{{ sys_user }}/.ssh/id_rsa ubuntu@$PRIMARY_IP "sudo cat /etc/kubernetes/admin.conf" > /root/.kube/config
 - chmod 600 /root/.kube/config
+- export KUBECONFIG=/root/.kube/config
 
 # Copy the config to the standard user
 - mkdir -p /home/{{ sys_user }}/.kube
@@ -1272,8 +1269,6 @@ runcmd:
 - kubectl get pods --all-namespaces
 - kubectl get nodes
 - sleep 10
-
-# ====================================WIP===========================================
 
 - echo "\n\n-------- Finished deploying Kubernetes using kubeadm, have fun!... --------\n"
 
