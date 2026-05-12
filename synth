@@ -1,9 +1,9 @@
 #!/bin/bash
 # ---
-# se-polymerase (synth.sh)
+# se-polymerase (synth)
 # Acts as the polymerase to synthesize an isolated, terraform-free LXD 
 # reproducer environment using the host's LXD for MAAS + Juju deployments.
-# version: 2.0.0
+# version: 3.0.0
 #
 # Synthesized by: Pablo Gonzalez De Greiff @ Canonical
 # ---
@@ -1240,7 +1240,7 @@ CLEAR_REST='\033[J'
 CLR_EOL=$'\033[K'
 
 while [ "$PHASE" != "DONE" ]; do
-
+    
     # PHASE A: LOG TAILING
     if [ "$PHASE" == "LOG_TAIL" ]; then
         
@@ -1252,9 +1252,10 @@ while [ "$PHASE" != "DONE" ]; do
         fi
         
         EXIT_CODE=$?
-
+        
         if [ $EXIT_CODE -eq 0 ]; then
             # Success! The 'sed' command found the Juju model deploy start and quit cleanly.
+            sleep 2
             STATUS_CHECK=$(ssh "${SSH_OPTS[@]}" "${SYS_USER}@$IP" "cloud-init status" 2>/dev/null)
             
             if [[ "$STATUS_CHECK" == *"status: error"* ]]; then
@@ -1266,13 +1267,14 @@ while [ "$PHASE" != "DONE" ]; do
                 echo ""
                 echo -e "${BYELLOW}cloud-init finished successfully! ${NC}${CLR_EOL}"
                 PHASE="DONE"
-            else
+            elif [ -n "$JUJU_TRIGGER_MSG" ] && ssh "${SSH_OPTS[@]}" "${SYS_USER}@$IP" "grep -Fq -- '$JUJU_TRIGGER_MSG' /var/log/cloud-init-output.log" 2>/dev/null; then
                 echo ""
                 echo -e "${BYELLOW}Juju Deployment Trigger Detected. Switching to Watch Mode...${NC}${CLR_EOL}"
                 sleep 2
                 PHASE="JUJU_WATCH"
+            else
+                sleep 2
             fi
-
         elif [ $EXIT_CODE -eq 255 ]; then
             # 255 = SSH died (Connection Refused / Network Down / Rebooting)
             echo -ne "${BYELLOW}Connection lost (Rebooting?) retrying...${NC}${CLR_EOL}\r"
@@ -1283,7 +1285,7 @@ while [ "$PHASE" != "DONE" ]; do
             sleep 2
         fi
     fi
-
+    
     # PHASE B: JUJU WATCH
     if [ "$PHASE" == "JUJU_WATCH" ]; then
         
@@ -1310,7 +1312,7 @@ while [ "$PHASE" != "DONE" ]; do
         LOG_OUTPUT=$(ssh "${SSH_OPTS[@]}" "${SYS_USER}@$IP" "tail -n $CLOUD_INIT_LOG_LINES /var/log/cloud-init-output.log | sed 's/\r$//' | sed 's/.*\r//' | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g'" 2>/dev/null)
         SSH_EXIT=$?
         CI_STATUS=$(ssh "${SSH_OPTS[@]}" "${SYS_USER}@$IP" "cloud-init status" 2>/dev/null)
-
+        
         # Check if we should stop (Is cloud-init done?)
         if [[ "$CI_STATUS" == *"status: error"* ]]; then
             echo ""
@@ -1329,16 +1331,16 @@ while [ "$PHASE" != "DONE" ]; do
             PHASE="DONE"
             break
         fi
-
+        
         # Repaint screen
         if [ $SSH_EXIT -eq 0 ]; then
             # Move cursor to top (0,0) -> Print Data -> Clear remaining junk at bottom
             echo -ne "${CURSOR_TOP}"
-
+            
             # Header
             echo -e "${BYELLOW}-> 5. Juju Deployment Status (cloud-init is running...)${NC}${CLR_EOL}"
             echo -e "Target IP: $IP | Updated: $(date +%T)${CLR_EOL}"
-
+            
             # Tail $CLOUD_INIT_LOG_LINES lines of cloud-init logs
             echo -e "${BYELLOW}---------------- Latest cloud-init Logs ----------------${NC}${CLR_EOL}"
             # Print logs, ensuring we wipe the end of the line for every log entry
@@ -1347,10 +1349,10 @@ while [ "$PHASE" != "DONE" ]; do
             else
                 echo -e "(Waiting for logs...)${CLR_EOL}"
             fi
-
+            
             # Juju watch
             echo -e "${BYELLOW}--------------------- Juju Status ----------------------${NC}${CLR_EOL}"
-
+            
             # Get terminal height (default to 64 if it fails)
             TERM_HEIGHT=$(tput lines 2>/dev/null || echo 64)
             
@@ -1359,7 +1361,7 @@ while [ "$PHASE" != "DONE" ]; do
             if [ "$MAX_JUJU_LINES" -lt 5 ]; then MAX_JUJU_LINES=5; fi # Fallback for tiny windows
             
             JUJU_LINE_COUNT=$(echo "$JUJU_OUTPUT" | wc -l)
-
+            
             # Print Juju output: Truncate if it exceeds available terminal lines
             if [ "$JUJU_LINE_COUNT" -gt "$MAX_JUJU_LINES" ]; then
                 HIDDEN_LINES=$(( JUJU_LINE_COUNT - MAX_JUJU_LINES ))
@@ -1375,7 +1377,7 @@ while [ "$PHASE" != "DONE" ]; do
             # If SSH fails, just print a warning on top, don't wipe screen
             echo -ne "${CURSOR_TOP}${BYELLOW}Connection lost. Reconnecting...${NC}${CLR_EOL}\r"
         fi
-
+        
         # Standard refresh rate
         sleep 3
     fi
@@ -1392,12 +1394,12 @@ if grep -q "custom_maas_" "$CLOUD_INIT"; then
     echo ""
     echo -e "${BYELLOW}-> 6. Opening MAAS Dashboard...${NC}"
     echo ""
-
+    
     MAAS_UI_URL="http://$IP:5240/MAAS/"
-
+    
     echo -e "${BYELLOW}  MAAS Dashboard:${NC} $MAAS_UI_URL"
     echo ""
-
+    
     if [ -n "$SSH_CLIENT" ] || [ -n "$SSH_TTY" ]; then
         REMOTE_USER=$(whoami)
         
